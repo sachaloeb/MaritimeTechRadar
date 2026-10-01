@@ -1,0 +1,4 @@
+# List of start-ups to evaluate.
+# Add 5-8 entries before running the pipeline.
+# Each entry needs: name, slug (url-safe id), urls (list of public pages to fetch), notes (optional).
+startups: []

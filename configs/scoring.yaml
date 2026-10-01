@@ -1,0 +1,141 @@
+# Scoring configuration for maritime-tech-radar.
+# All weights must sum to 1.0. Each criterion is scored 0-5.
+
+criteria:
+  maritime_relevance:
+    weight: 0.30
+    saturation: 10
+    keywords:
+      - maritime
+      - shipping
+      - port
+      - vessel
+      - cargo
+      - marine
+      - offshore
+      - nautical
+      - fleet
+      - terminal
+
+  theme_fit:
+    weight: 0.25
+    saturation: 8
+    keywords: []  # scored from quadrant keyword hits
+
+  maturity_signals:
+    weight: 0.25
+    saturation: 6
+    keywords:
+      - pilot
+      - customer
+      - deployed
+      - partnership
+      - funding
+      - contract
+      - revenue
+      - series
+      - raised
+      - launch
+
+  evidence_quality:
+    weight: 0.20
+    saturation: 4
+    keywords:
+      - case study
+      - whitepaper
+      - report
+      - press release
+      - announcement
+      - published
+
+# Ring thresholds (total score 0-100)
+rings:
+  pilot_ready: 70
+  promising: 50
+  early: 30
+  # Below 30 = "Watch"
+
+# Quadrant themes with keyword lists
+quadrants:
+  decarbonisation_energy:
+    label: "Decarbonisation & Energy"
+    keywords:
+      - decarbonisation
+      - decarbonization
+      - carbon
+      - emission
+      - green
+      - hydrogen
+      - ammonia
+      - methanol
+      - electric
+      - battery
+      - solar
+      - wind
+      - energy
+      - fuel
+      - clean
+      - zero-emission
+      - sustainability
+
+  digitalisation_ai:
+    label: "Digitalisation & AI"
+    keywords:
+      - digital
+      - digitalisation
+      - digitalization
+      - ai
+      - artificial intelligence
+      - machine learning
+      - data
+      - analytics
+      - iot
+      - sensor
+      - platform
+      - automation
+      - predictive
+      - cloud
+      - software
+
+  logistics_operations:
+    label: "Logistics & Operations"
+    keywords:
+      - logistics
+      - supply chain
+      - tracking
+      - scheduling
+      - routing
+      - optimisation
+      - optimization
+      - efficiency
+      - warehouse
+      - container
+      - freight
+      - customs
+      - trade
+      - booking
+      - visibility
+
+  safety_security:
+    label: "Safety & Security"
+    keywords:
+      - safety
+      - security
+      - cybersecurity
+      - monitoring
+      - compliance
+      - inspection
+      - risk
+      - surveillance
+      - detection
+      - emergency
+      - hazard
+      - regulation
+      - certification
+
+# Denylist: never fetch these domains
+denylist:
+  - linkedin.com
+  - crunchbase.com
+  - glassdoor.com
+  - facebook.com
