@@ -1,32 +1,58 @@
 """Fetch URLs from startups.yaml, respecting robots.txt, rate limits, and caching."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+import pandas as pd
 import requests
 
 from radar.config import ScoringConfig, StartupsConfig
+from radar.paths import raw_dir
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "maritime-tech-radar/0.1 (research prototype; contact: sacha.loeb@hotmail.com)"
+USER_AGENT = (
+    "maritime-tech-radar/0.1 (research prototype; contact: sacha.loeb@hotmail.com)"
+)
 TIMEOUT = 15
 MAX_RETRIES = 2
 BACKOFF_BASE = 2.0
 RATE_LIMIT_SECONDS = 2.0
-RAW_DIR = Path("data/raw")
+
+# Outcome constants
+FETCHED = "fetched"
+CACHE_HIT = "cache_hit"
+CACHED_FAILURE = "cached_failure"
+ROBOTS_DENIED = "robots_denied"
+DENYLIST = "denylist"
+HTTP_ERROR = "http_error"
+NETWORK_ERROR = "network_error"
+NO_CACHE = "no_cache"
 
 
-def _url_to_cache_path(url: str) -> Path:
+@dataclass(frozen=True)
+class CollectResult:
+    slug: str
+    url: str
+    outcome: str
+    http_status: int | None
+    fetched_at: str
+    cache_path: Path | None
+
+
+def url_to_cache_path(url: str, demo: bool = False) -> Path:
     """Deterministic cache path from URL hash."""
     h = hashlib.sha256(url.encode()).hexdigest()[:16]
-    return RAW_DIR / f"{h}.json"
+    return raw_dir(demo) / f"{h}.json"
 
 
 def _is_denied(url: str, denylist: list[str]) -> bool:
@@ -41,19 +67,52 @@ _robots_cache: dict[str, RobotFileParser | None] = {}
 
 
 def _check_robots(url: str) -> bool:
-    """Return True if robots.txt allows fetching this URL."""
+    """Return True if robots.txt allows fetching this URL.
+
+    Fetches robots.txt through the same rate limiter with project User-Agent.
+    Conservative: 5xx or network errors -> disallow for this run (never cached).
+    404/410 -> allow. 401/403 -> disallow.
+    """
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
     if robots_url not in _robots_cache:
-        rp = RobotFileParser()
-        rp.set_url(robots_url)
+        _rate_limit(robots_url)
         try:
-            rp.read()
+            resp = requests.get(
+                robots_url,
+                headers={"User-Agent": USER_AGENT},
+                timeout=TIMEOUT,
+                allow_redirects=True,
+            )
+            if resp.status_code in (404, 410):
+                logger.debug("robots.txt not found (%d) for %s, allowing", resp.status_code,
+                             parsed.netloc)
+                _robots_cache[robots_url] = None
+            elif resp.status_code in (401, 403):
+                logger.warning("robots.txt returned %d for %s, disallowing all",
+                               resp.status_code, parsed.netloc)
+                rp = RobotFileParser()
+                rp.parse(["User-agent: *", "Disallow: /"])
+                _robots_cache[robots_url] = rp
+            elif resp.status_code >= 500:
+                logger.warning("robots.txt returned %d for %s, disallowing (conservative)",
+                               resp.status_code, parsed.netloc)
+                rp = RobotFileParser()
+                rp.parse(["User-agent: *", "Disallow: /"])
+                _robots_cache[robots_url] = rp
+            else:
+                rp = RobotFileParser()
+                rp.parse(resp.text.splitlines())
+                _robots_cache[robots_url] = rp
+        except requests.RequestException as exc:
+            logger.warning(
+                "Could not fetch robots.txt for %s (%s), disallowing (conservative)",
+                parsed.netloc, exc,
+            )
+            rp = RobotFileParser()
+            rp.parse(["User-agent: *", "Disallow: /"])
             _robots_cache[robots_url] = rp
-        except Exception:
-            logger.warning("Could not fetch robots.txt for %s, allowing by default", parsed.netloc)
-            _robots_cache[robots_url] = None
 
     rp = _robots_cache[robots_url]
     if rp is None:
@@ -79,7 +138,10 @@ def _fetch_with_retry(url: str) -> requests.Response:
         try:
             _rate_limit(url)
             resp = requests.get(
-                url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
+                url,
+                headers={"User-Agent": USER_AGENT},
+                timeout=TIMEOUT,
+                allow_redirects=True,
             )
             return resp
         except requests.RequestException as exc:
@@ -87,21 +149,23 @@ def _fetch_with_retry(url: str) -> requests.Response:
                 wait = BACKOFF_BASE ** (attempt + 1)
                 logger.warning(
                     "Retry %d/%d for %s after error: %s (waiting %.1fs)",
-                    attempt + 1,
-                    MAX_RETRIES,
-                    url,
-                    exc,
-                    wait,
+                    attempt + 1, MAX_RETRIES, url, exc, wait,
                 )
                 time.sleep(wait)
             else:
                 raise
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _save_cache(url: str, response: requests.Response | None, error: str | None = None) -> Path:
+def _save_cache(
+    url: str,
+    response: requests.Response | None,
+    error: str | None = None,
+    demo: bool = False,
+) -> Path:
     """Save fetched page with provenance metadata."""
-    cache_path = _url_to_cache_path(url)
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = url_to_cache_path(url, demo)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     content = response.text if response is not None else ""
     record = {
@@ -112,38 +176,98 @@ def _save_cache(url: str, response: requests.Response | None, error: str | None 
         "error": error,
         "content": content,
     }
-    cache_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    cache_path.write_text(
+        json.dumps(record, ensure_ascii=False), encoding="utf-8"
+    )
     return cache_path
 
 
-def collect_url(url: str, denylist: list[str], refresh: bool = False) -> Path | None:
-    """Collect a single URL. Returns the cache path or None if skipped."""
-    cache_path = _url_to_cache_path(url)
+def _read_cache(cache_path: Path) -> dict | None:
+    """Read a cache file and return parsed JSON, or None."""
+    try:
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _is_usable(cache_data: dict | None) -> bool:
+    """A cached page is usable only if status=200 and non-empty content."""
+    if cache_data is None:
+        return False
+    return (
+        cache_data.get("http_status") == 200
+        and bool(cache_data.get("content", "").strip())
+    )
+
+
+def collect_url(
+    slug: str,
+    url: str,
+    denylist: list[str],
+    refresh: bool = False,
+    demo: bool = False,
+) -> CollectResult:
+    """Collect a single URL. Returns a CollectResult."""
+    now = datetime.now(timezone.utc).isoformat()
+    cache_path = url_to_cache_path(url, demo)
 
     if _is_denied(url, denylist):
-        logger.info("SKIP (denylist): %s", url)
-        return None
+        logger.info("SKIP (denylist): %s [%s]", url, slug)
+        return CollectResult(slug, url, DENYLIST, None, now, None)
 
     if cache_path.exists() and not refresh:
-        logger.debug("CACHE HIT: %s", url)
-        return cache_path
+        cached = _read_cache(cache_path)
+        if _is_usable(cached):
+            logger.debug("CACHE HIT: %s [%s]", url, slug)
+            return CollectResult(
+                slug, url, CACHE_HIT,
+                cached.get("http_status") if cached else None,
+                cached.get("fetched_at", now) if cached else now,
+                cache_path,
+            )
+        else:
+            logger.debug("CACHED FAILURE: %s [%s]", url, slug)
+            return CollectResult(
+                slug, url, CACHED_FAILURE,
+                cached.get("http_status") if cached else None,
+                cached.get("fetched_at", now) if cached else now,
+                None,
+            )
 
     if not _check_robots(url):
-        logger.info("SKIP (robots.txt): %s", url)
-        return None
+        logger.info("SKIP (robots.txt): %s [%s]", url, slug)
+        return CollectResult(slug, url, ROBOTS_DENIED, None, now, None)
 
     try:
         resp = _fetch_with_retry(url)
+
+        # After redirects, re-check final URL against denylist
+        final_url = resp.url
+        if final_url != url and _is_denied(final_url, denylist):
+            logger.info(
+                "SKIP (redirect to denylist): %s -> %s [%s]", url, final_url, slug
+            )
+            return CollectResult(slug, url, DENYLIST, resp.status_code, now, None)
+
         if resp.status_code >= 400:
-            logger.warning("HTTP %d for %s", resp.status_code, url)
-            _save_cache(url, resp)
-            return None
-        logger.info("FETCHED %d %s (%d bytes)", resp.status_code, url, len(resp.content))
-        return _save_cache(url, resp)
+            logger.warning("HTTP %d for %s [%s]", resp.status_code, url, slug)
+            _save_cache(url, resp, demo=demo)
+            return CollectResult(
+                slug, url, HTTP_ERROR, resp.status_code, now, None
+            )
+
+        saved = _save_cache(url, resp, demo=demo)
+        logger.info(
+            "FETCHED %d %s (%d bytes) [%s]",
+            resp.status_code, url, len(resp.content), slug,
+        )
+        return CollectResult(
+            slug, url, FETCHED, resp.status_code, now, saved
+        )
     except requests.RequestException as exc:
-        logger.error("FAILED after retries: %s — %s", url, exc)
-        _save_cache(url, None, error=str(exc))
-        return None
+        logger.error("FAILED after retries: %s — %s [%s]", url, exc, slug)
+        _save_cache(url, None, error=str(exc), demo=demo)
+        return CollectResult(slug, url, NETWORK_ERROR, None, now, None)
 
 
 def collect_all(
@@ -151,29 +275,98 @@ def collect_all(
     scoring_cfg: ScoringConfig,
     refresh: bool = False,
     offline: bool = False,
-) -> dict[str, list[Path]]:
-    """Collect all URLs for all start-ups. Returns {slug: [cache_paths]}."""
+    demo: bool = False,
+) -> tuple[dict[str, list[Path]], list[CollectResult]]:
+    """Collect all URLs. Returns ({slug: [usable_cache_paths]}, [all_results])."""
+    all_results: list[CollectResult] = []
+
     if offline:
-        logger.info("OFFLINE mode: using cached pages only")
+        logger.info("OFFLINE mode: using cached pages only, zero network calls")
         result: dict[str, list[Path]] = {}
         for s in startups_cfg.startups:
-            paths = []
+            paths: list[Path] = []
             for url in s.urls:
-                cp = _url_to_cache_path(url)
+                cp = url_to_cache_path(url, demo)
                 if cp.exists():
-                    paths.append(cp)
+                    cached = _read_cache(cp)
+                    if _is_usable(cached):
+                        paths.append(cp)
+                        all_results.append(CollectResult(
+                            s.slug, url, CACHE_HIT,
+                            cached.get("http_status") if cached else None,
+                            cached.get("fetched_at", "") if cached else "",
+                            cp,
+                        ))
+                    else:
+                        all_results.append(CollectResult(
+                            s.slug, url, CACHED_FAILURE,
+                            cached.get("http_status") if cached else None,
+                            cached.get("fetched_at", "") if cached else "",
+                            None,
+                        ))
                 else:
-                    logger.warning("OFFLINE: no cache for %s (%s)", url, s.slug)
+                    logger.warning(
+                        "OFFLINE: no cache for %s (%s)", url, s.slug
+                    )
+                    all_results.append(CollectResult(
+                        s.slug, url, NO_CACHE, None, "", None
+                    ))
             result[s.slug] = paths
-        return result
+        return result, all_results
 
     result = {}
     for s in startups_cfg.startups:
         paths = []
         for url in s.urls:
-            path = collect_url(url, scoring_cfg.denylist, refresh=refresh)
-            if path is not None:
-                paths.append(path)
+            cr = collect_url(s.slug, url, scoring_cfg.denylist,
+                             refresh=refresh, demo=demo)
+            all_results.append(cr)
+            if cr.cache_path is not None:
+                paths.append(cr.cache_path)
         result[s.slug] = paths
-        logger.info("Collected %d/%d pages for %s", len(paths), len(s.urls), s.slug)
-    return result
+        logger.info(
+            "Collected %d/%d usable pages for %s",
+            len(paths), len(s.urls), s.slug,
+        )
+    return result, all_results
+
+
+def write_collection_report(
+    results: list[CollectResult], output_path: Path
+) -> None:
+    """Write collection results to a CSV report."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "slug": r.slug,
+            "url": r.url,
+            "outcome": r.outcome,
+            "http_status": r.http_status,
+            "fetched_at": r.fetched_at,
+            "cache_path": str(r.cache_path) if r.cache_path else "",
+        }
+        for r in sorted(results, key=lambda r: (r.slug, r.url))
+    ]
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    logger.info("Collection report written to %s", output_path)
+
+
+def write_manifest(results: list[CollectResult], output_path: Path) -> None:
+    """Write raw data manifest (provenance) CSV."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for r in sorted(results, key=lambda r: (r.slug, r.url)):
+        content_hash = ""
+        if r.cache_path and r.cache_path.exists():
+            cached = _read_cache(r.cache_path)
+            if cached:
+                content_hash = cached.get("content_hash", "")
+        rows.append({
+            "url": r.url,
+            "fetched_at": r.fetched_at,
+            "http_status": r.http_status,
+            "content_hash": content_hash,
+            "outcome": r.outcome,
+        })
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    logger.info("Manifest written to %s", output_path)
