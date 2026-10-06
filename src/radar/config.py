@@ -4,10 +4,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-CONFIGS_DIR = Path("configs")
-
+from radar.paths import CONFIGS_DIR
 
 # ── Startups config ──────────────────────────────────────────────────────────
 
@@ -17,6 +16,16 @@ class StartupEntry(BaseModel):
     slug: str = Field(pattern=r"^[a-z0-9][a-z0-9\-]*$")
     urls: list[str] = Field(min_length=1)
     notes: str = ""
+
+    @field_validator("urls")
+    @classmethod
+    def urls_must_not_contain_pipe(cls, v: list[str]) -> list[str]:
+        for url in v:
+            if "|" in url:
+                raise ValueError(
+                    f"URL must not contain pipe character '|' (used as list delimiter): {url}"
+                )
+        return v
 
 
 class StartupsConfig(BaseModel):
@@ -30,6 +39,7 @@ class CriterionConfig(BaseModel):
     weight: float = Field(ge=0.0, le=1.0)
     saturation: int = Field(ge=1)
     keywords: list[str] = Field(default_factory=list)
+    derived_from: str | None = None
 
 
 class RingsConfig(BaseModel):
@@ -53,11 +63,10 @@ class ScoringConfig(BaseModel):
     def check_weights_sum_to_one(self) -> "ScoringConfig":
         total = sum(c.weight for c in self.criteria.values())
         if abs(total - 1.0) > 0.001:
+            weight_detail = {k: c.weight for k, c in self.criteria.items()}
             raise ValueError(
                 f"Criterion weights must sum to 1.0, got {total:.4f}. "
-                f"Current weights: {
-                    {k: c.weight for k, c in self.criteria.items()}
-                }"
+                f"Current weights: {weight_detail}"
             )
         return self
 
@@ -71,7 +80,9 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
+        raise ValueError(
+            f"Expected a YAML mapping in {path}, got {type(data).__name__}"
+        )
     return data
 
 
