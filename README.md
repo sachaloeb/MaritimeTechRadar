@@ -10,7 +10,7 @@ make install
 
 # Run the demo (synthetic data)
 make demo
-make app         # opens the dashboard at http://localhost:8501
+make demo-app    # opens the dashboard at http://localhost:8501
 ```
 
 ## Real-data workflow

@@ -1,4 +1,65 @@
-# List of start-ups to evaluate.
-# Add 5-8 entries before running the pipeline.
-# Each entry needs: name, slug (url-safe id), urls (list of public pages to fetch), notes (optional).
-startups: []
+# Start-ups to evaluate. Selection rule: docs/SELECTION_RULE.md (written 2026-10-05, before any scoring).
+# STATUS: DRAFT seed list. Names and homepages are from recollection, not verified.
+# Before `radar run`, for every entry:
+#   1. open the homepage in a browser and confirm the company still exists, is independent and fits the rule;
+#   2. open the candidate second page, and uncomment it only if it loads and has real text (not a JS-only shell);
+#   3. check robots.txt and terms for the domain; delete the entry if automated access is not allowed;
+#   4. check the name against the current PortXL cohort on portxl.org and replace it if listed.
+# "Expected theme" is a hypothesis for sampling a mix. The pipeline assigns themes by keywords, and you confirm them in review.
+
+startups:
+  - name: "Portchain"
+    slug: "portchain"
+    urls:
+      - "https://portchain.com"
+      # - "https://portchain.com/about"   # candidate, unverified
+    notes: "Port-call and terminal coordination software. Expected theme: logistics_operations."
+
+  - name: "Searoutes"
+    slug: "searoutes"
+    urls:
+      - "https://searoutes.com"
+      - "https://searoutes.com/about"
+    notes: "Routing and emissions-calculation data for freight. Expected theme: logistics_operations."
+
+  - name: "Norsepower"
+    slug: "norsepower"
+    urls:
+      - "https://www.norsepower.com"
+      # - "https://www.norsepower.com/about-us"   # candidate, unverified
+    notes: "Wind-assisted propulsion (rotor sails). Expected theme: decarbonisation_energy."
+
+  - name: "Nautilus Labs"
+    slug: "nautilus-labs"
+    urls:
+      - "https://www.nautiluslabs.com"
+      # - "https://www.nautiluslabs.com/about"   # candidate, unverified
+    notes: "Vessel performance analytics. Expected theme: digitalisation_ai."
+
+  - name: "Orca AI"
+    slug: "orca-ai"
+    urls:
+      - "https://www.orca-ai.io"
+      - "https://www.orca-ai.io/about"   # candidate, unverified
+    notes: "AI situational awareness and collision avoidance. Expected theme: safety_security."
+
+  - name: "Cydome"
+    slug: "cydome"
+    urls:
+      - "https://www.cydome.io"
+      - "https://www.cydome.io/about"   # candidate, unverified
+    notes: "Maritime cybersecurity. Expected theme: safety_security."
+
+  # Reserves, in case an entry above fails the rule, is blocked by robots.txt or has empty pages.
+  # Activate by removing the leading '# ' from the whole block, then verify as above.
+  # - name: "Smart Green Shipping"
+  #   slug: "smart-green-shipping"
+  #   urls:
+  #     - "https://www.smartgreenshipping.com"
+  #   notes: "Wind propulsion. Expected theme: decarbonisation_energy."
+  #
+  # - name: "Awake.AI"
+  #   slug: "awake-ai"
+  #   urls:
+  #     - "https://www.awake.ai"
+  #   notes: "AI for port and vessel operations. Expected theme: digitalisation_ai."
