@@ -1,5 +1,8 @@
 # Scoring configuration for maritime-tech-radar.
 # All weights must sum to 1.0. Each criterion is scored 0-5.
+# Keyword matching: case-insensitive whole-word/phrase with word boundaries,
+# optionally allowing a trailing plural "s". Pattern: (?<![a-z0-9])kw(?:s)?(?![a-z0-9])
+# "port" will NOT match "support" or "report"; "ai" will NOT match "email".
 
 criteria:
   maritime_relevance:
@@ -20,7 +23,7 @@ criteria:
   theme_fit:
     weight: 0.25
     saturation: 8
-    keywords: []  # scored from quadrant keyword hits
+    derived_from: best_quadrant
 
   maturity_signals:
     weight: 0.25
@@ -39,7 +42,7 @@ criteria:
 
   evidence_quality:
     weight: 0.20
-    saturation: 4
+    saturation: 6
     keywords:
       - case study
       - whitepaper

@@ -1,7 +1,10 @@
-"""Parse cached HTML into structured fields with keyword hit counts."""
+"""Parse cached HTML into structured fields with whole-word keyword matching."""
+
+from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -9,6 +12,33 @@ from bs4 import BeautifulSoup
 from radar.config import ScoringConfig
 
 logger = logging.getLogger(__name__)
+
+# ── Keyword matching ────────────────────────────────────────────────────────
+# Whole-word/phrase matching with boundaries: (?<![a-z0-9])kw(?:s)?(?![a-z0-9])
+# This prevents "port" from matching "support"/"report", "ai" from "email", etc.
+
+_compiled_patterns: dict[str, re.Pattern[str]] = {}
+
+
+def _compile_pattern(keyword: str) -> re.Pattern[str]:
+    """Compile a regex for whole-word matching with optional plural 's'."""
+    if keyword not in _compiled_patterns:
+        escaped = re.escape(keyword.lower())
+        pattern = rf"(?<![a-z0-9]){escaped}(?:s)?(?![a-z0-9])"
+        _compiled_patterns[keyword] = re.compile(pattern, re.IGNORECASE)
+    return _compiled_patterns[keyword]
+
+
+def match_keywords(text: str, keywords: list[str]) -> set[str]:
+    """Return the set of keywords that match in the text (whole-word)."""
+    matched: set[str] = set()
+    for kw in keywords:
+        if _compile_pattern(kw).search(text):
+            matched.add(kw)
+    return matched
+
+
+# ── HTML extraction ─────────────────────────────────────────────────────────
 
 
 def _extract_text(html: str) -> tuple[str, str, str]:
@@ -31,16 +61,15 @@ def _extract_text(html: str) -> tuple[str, str, str]:
     return title, meta_desc, visible_text
 
 
-def _count_keyword_hits(text: str, keywords: list[str]) -> int:
-    """Count how many distinct keywords appear in the text (case-insensitive)."""
-    text_lower = text.lower()
-    return sum(1 for kw in keywords if kw.lower() in text_lower)
+# ── Per-page extraction ─────────────────────────────────────────────────────
 
 
-def extract_page(cache_path: Path, scoring_cfg: ScoringConfig) -> dict | None:
+def extract_page(
+    cache_path: Path, scoring_cfg: ScoringConfig
+) -> dict | None:
     """Extract structured fields from a single cached page.
 
-    Returns a dict of extracted fields, or None if the page can't be parsed.
+    Returns a dict with matched keyword sets per criterion/quadrant, or None.
     """
     try:
         raw = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -53,37 +82,52 @@ def extract_page(cache_path: Path, scoring_cfg: ScoringConfig) -> dict | None:
         logger.warning("Empty content in %s", cache_path)
         return None
 
-    title, meta_desc, visible_text = _extract_text(content)
+    page_title, meta_desc, visible_text = _extract_text(content)
     snippet = visible_text[:500]
 
-    # Count keyword hits per criterion
-    criterion_hits: dict[str, int] = {}
+    # Match keywords per criterion (returns sets)
+    criterion_matched: dict[str, set[str]] = {}
     for crit_name, crit_cfg in scoring_cfg.criteria.items():
-        criterion_hits[f"{crit_name}_hits"] = _count_keyword_hits(visible_text, crit_cfg.keywords)
+        if crit_cfg.derived_from:
+            # Derived criteria computed at aggregation time
+            criterion_matched[crit_name] = set()
+        else:
+            criterion_matched[crit_name] = match_keywords(
+                visible_text, crit_cfg.keywords
+            )
 
-    # Count keyword hits per quadrant
-    quadrant_hits: dict[str, int] = {}
+    # Match keywords per quadrant
+    quadrant_matched: dict[str, set[str]] = {}
     for quad_name, quad_cfg in scoring_cfg.quadrants.items():
-        quadrant_hits[f"{quad_name}_hits"] = _count_keyword_hits(visible_text, quad_cfg.keywords)
+        quadrant_matched[quad_name] = match_keywords(
+            visible_text, quad_cfg.keywords
+        )
 
     return {
         "url": raw.get("url", ""),
         "fetched_at": raw.get("fetched_at", ""),
         "http_status": raw.get("http_status"),
-        "title": title,
+        "content_hash": raw.get("content_hash", ""),
+        "page_title": page_title,
         "meta_description": meta_desc,
         "text_snippet": snippet,
-        **criterion_hits,
-        **quadrant_hits,
+        "_criterion_matched": criterion_matched,
+        "_quadrant_matched": quadrant_matched,
     }
 
 
-def extract_startup(
-    slug: str, cache_paths: list[Path], scoring_cfg: ScoringConfig
-) -> dict | None:
-    """Extract and aggregate fields across all cached pages for a start-up.
+# ── Per-startup aggregation ─────────────────────────────────────────────────
 
-    Returns aggregated row or None if no pages could be parsed.
+
+def extract_startup(
+    slug: str,
+    name: str,
+    cache_paths: list[Path],
+    scoring_cfg: ScoringConfig,
+) -> dict | None:
+    """Extract and aggregate across all cached pages for a start-up.
+
+    Uses UNION of matched keywords (distinct) so page count doesn't inflate scores.
     """
     pages = []
     for cp in cache_paths:
@@ -95,33 +139,91 @@ def extract_startup(
         logger.warning("No parseable pages for %s", slug)
         return None
 
-    # Aggregate: keep first title/description, sum keyword hits, join URLs
+    # Union matched keywords across pages
+    crit_union: dict[str, set[str]] = {}
+    for crit_name in scoring_cfg.criteria:
+        crit_union[crit_name] = set()
+        for p in pages:
+            crit_union[crit_name] |= p["_criterion_matched"].get(crit_name, set())
+
+    quad_union: dict[str, set[str]] = {}
+    for quad_name in scoring_cfg.quadrants:
+        quad_union[quad_name] = set()
+        for p in pages:
+            quad_union[quad_name] |= p["_quadrant_matched"].get(quad_name, set())
+
+    # Derive theme_fit from best quadrant (D1 fix)
+    for crit_name, crit_cfg in scoring_cfg.criteria.items():
+        if crit_cfg.derived_from == "best_quadrant":
+            best_quad_keywords: set[str] = set()
+            for qset in quad_union.values():
+                if len(qset) > len(best_quad_keywords):
+                    best_quad_keywords = qset
+            crit_union[crit_name] = best_quad_keywords
+
+    # Deduplicate pages by content_hash for evidence_quality
+    seen_hashes: set[str] = set()
+    distinct_pages = 0
+    for p in pages:
+        ch = p.get("content_hash", "")
+        if ch and ch not in seen_hashes:
+            seen_hashes.add(ch)
+            distinct_pages += 1
+
     first = pages[0]
+
+    # Build source info columns (pipe-joined, aligned)
+    source_urls = "|".join(p["url"] for p in pages)
+    source_fetched_at = "|".join(p["fetched_at"] for p in pages)
+    source_statuses = "|".join(
+        str(p.get("http_status", "")) for p in pages
+    )
+
     aggregated: dict = {
         "slug": slug,
-        "title": first["title"],
+        "name": name,
+        "page_title": first["page_title"],
         "meta_description": first["meta_description"],
         "text_snippet": first["text_snippet"],
-        "source_urls": "|".join(p["url"] for p in pages),
-        "fetched_at": first["fetched_at"],
+        "source_urls": source_urls,
+        "source_fetched_at": source_fetched_at,
+        "source_statuses": source_statuses,
         "source_count": len(pages),
+        "distinct_pages": distinct_pages,
     }
 
-    # Sum all _hits columns across pages
-    hit_keys = [k for k in first if k.endswith("_hits")]
-    for key in hit_keys:
-        aggregated[key] = sum(p.get(key, 0) for p in pages)
+    # Write hits and matched columns for each criterion
+    for crit_name in scoring_cfg.criteria:
+        matched = crit_union[crit_name]
+        aggregated[f"{crit_name}_hits"] = len(matched)
+        aggregated[f"{crit_name}_matched"] = "|".join(sorted(matched))
+
+    # Write hits and matched columns for each quadrant
+    for quad_name in scoring_cfg.quadrants:
+        matched = quad_union[quad_name]
+        aggregated[f"{quad_name}_hits"] = len(matched)
+        aggregated[f"{quad_name}_matched"] = "|".join(sorted(matched))
+
+    # evidence_quality: distinct pages + distinct evidence keywords
+    ev_crit = scoring_cfg.criteria.get("evidence_quality")
+    if ev_crit and not ev_crit.derived_from:
+        ev_kw_hits = len(crit_union.get("evidence_quality", set()))
+        aggregated["evidence_quality_hits"] = distinct_pages + ev_kw_hits
 
     return aggregated
 
 
 def extract_all(
-    collected: dict[str, list[Path]], scoring_cfg: ScoringConfig
+    collected: dict[str, list[Path]],
+    scoring_cfg: ScoringConfig,
+    slug_to_name: dict[str, str] | None = None,
 ) -> list[dict]:
     """Extract structured data for all start-ups."""
+    slug_to_name = slug_to_name or {}
     rows = []
     for slug, paths in collected.items():
-        row = extract_startup(slug, paths, scoring_cfg)
+        name = slug_to_name.get(slug, slug)
+        row = extract_startup(slug, name, paths, scoring_cfg)
         if row is not None:
             rows.append(row)
     return rows
