@@ -1,8 +1,6 @@
 # Maritime Tech Radar
 
-A config-driven pipeline and single-page Streamlit dashboard that ranks a handful of public maritime/port-tech start-ups on a technology radar. Built as an independent work sample for a Data & Research internship application.
-
-**Not affiliated with or endorsed by PortXL.** Uses public information only.
+A config-driven pipeline and single-page Streamlit dashboard that ranks a handful of public maritime/port-tech start-ups on a technology radar.
 
 ## Quick start
 
