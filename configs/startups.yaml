@@ -12,7 +12,7 @@ startups:
     slug: "portchain"
     urls:
       - "https://portchain.com"
-      # - "https://portchain.com/about"   # candidate, unverified
+      - "https://portchain.com/about-us-portchain"
     notes: "Port-call and terminal coordination software. Expected theme: logistics_operations."
 
   - name: "Searoutes"
@@ -26,28 +26,21 @@ startups:
     slug: "norsepower"
     urls:
       - "https://www.norsepower.com"
-      # - "https://www.norsepower.com/about-us"   # candidate, unverified
+      - "https://www.norsepower.com/norsepower/"
     notes: "Wind-assisted propulsion (rotor sails). Expected theme: decarbonisation_energy."
-
-  - name: "Nautilus Labs"
-    slug: "nautilus-labs"
-    urls:
-      - "https://www.nautiluslabs.com"
-      # - "https://www.nautiluslabs.com/about"   # candidate, unverified
-    notes: "Vessel performance analytics. Expected theme: digitalisation_ai."
 
   - name: "Orca AI"
     slug: "orca-ai"
     urls:
       - "https://www.orca-ai.io"
-      - "https://www.orca-ai.io/about"   # candidate, unverified
+      - "https://www.orca-ai.io/about"
     notes: "AI situational awareness and collision avoidance. Expected theme: safety_security."
 
   - name: "Cydome"
     slug: "cydome"
     urls:
       - "https://www.cydome.io"
-      - "https://www.cydome.io/about"   # candidate, unverified
+      - "https://www.cydome.io/about"
     notes: "Maritime cybersecurity. Expected theme: safety_security."
 
   # Reserves, in case an entry above fails the rule, is blocked by robots.txt or has empty pages.
