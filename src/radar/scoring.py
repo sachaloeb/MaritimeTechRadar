@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +11,9 @@ import pandas as pd
 from radar.config import ScoringConfig
 
 logger = logging.getLogger(__name__)
+
+# Rings that are NOT scored — used across scoring, analysis, dashboard, tests
+NON_SCORED_RINGS = frozenset({"Unreviewed", "Excluded"})
 
 
 def _criterion_score(hits: int, saturation: int) -> float:
@@ -161,6 +165,39 @@ def score_row(
     }
 
 
+def _fill_nonscore_cols(
+    subset: pd.DataFrame,
+    cfg: ScoringConfig,
+    ring_label: str,
+    dataset_kind: str,
+) -> None:
+    """Fill score/ring/theme columns for non-scored subsets (in-place).
+
+    Uses explicit float dtype for score columns to avoid pandas
+    FutureWarning about all-NA concat.
+    """
+    for col in [f"{c}_score" for c in cfg.criteria]:
+        if col not in subset.columns:
+            subset[col] = pd.array([pd.NA] * len(subset), dtype="Float64")
+    if "total_score" not in subset.columns:
+        subset["total_score"] = pd.array(
+            [pd.NA] * len(subset), dtype="Float64"
+        )
+    for col in ["theme", "ring", "overridden_fields"]:
+        if col not in subset.columns:
+            subset[col] = ""
+    subset["ring"] = ring_label
+    subset["dataset_kind"] = dataset_kind
+    # Assign theme for display where possible
+    for idx, row in subset.iterrows():
+        try:
+            subset.at[idx, "theme"] = _assign_theme(
+                row, list(cfg.quadrants.keys())
+            )
+        except ValueError:
+            subset.at[idx, "theme"] = "unassigned"
+
+
 def score_dataframe(
     df: pd.DataFrame,
     cfg: ScoringConfig,
@@ -193,7 +230,8 @@ def score_dataframe(
         else:
             df[col] = False
 
-    # Split: exclude excluded rows entirely
+    # Split into excluded / reviewed / unreviewed
+    excluded = df[df["excluded"]].copy()
     non_excluded = df[~df["excluded"]].copy()
     reviewed = non_excluded[non_excluded["reviewed"]].copy()
     unreviewed = non_excluded[~non_excluded["reviewed"]].copy()
@@ -213,41 +251,40 @@ def score_dataframe(
 
     scored["dataset_kind"] = dataset_kind
 
+    parts = [scored]
+
     if include_unreviewed and not unreviewed.empty:
         # Add unreviewed with empty score columns and ring "Unreviewed"
-        for col in [f"{c}_score" for c in cfg.criteria]:
-            if col not in unreviewed.columns:
-                unreviewed[col] = pd.NA
-        for col in ["total_score", "theme", "ring", "overridden_fields"]:
-            if col not in unreviewed.columns:
-                unreviewed[col] = pd.NA
-        unreviewed["ring"] = "Unreviewed"
-        unreviewed["dataset_kind"] = dataset_kind
+        _fill_nonscore_cols(unreviewed, cfg, "Unreviewed", dataset_kind)
+        parts.append(unreviewed)
 
-        # Assign theme for unreviewed if possible (for display)
-        for idx, row in unreviewed.iterrows():
-            try:
-                unreviewed.at[idx, "theme"] = _assign_theme(
-                    row, list(cfg.quadrants.keys())
-                )
-            except ValueError:
-                unreviewed.at[idx, "theme"] = "unassigned"
+    # Always include excluded rows so dashboard can show them
+    if not excluded.empty:
+        _fill_nonscore_cols(excluded, cfg, "Excluded", dataset_kind)
+        parts.append(excluded)
 
-        result = pd.concat([scored, unreviewed], ignore_index=True)
+    if len(parts) > 1:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*concatenation with empty or all-NA.*",
+                category=FutureWarning,
+            )
+            result = pd.concat(parts, ignore_index=True)
     else:
         result = scored
 
-    # Stable sort: scored rows by total_score desc then slug asc;
-    # unreviewed at the end
+    # Stable sort
+    ring_order = {
+        "Pilot-ready": 0, "Promising": 1, "Early": 2,
+        "Watch": 3, "Unreviewed": 4, "Excluded": 5,
+    }
     if not result.empty:
         result = result.sort_values(
             ["ring", "total_score", "slug"],
             ascending=[True, False, True],
             key=lambda col: (
-                col.map({
-                    "Pilot-ready": 0, "Promising": 1, "Early": 2,
-                    "Watch": 3, "Unreviewed": 4,
-                }) if col.name == "ring" else col
+                col.map(ring_order) if col.name == "ring" else col
             ),
             na_position="last",
         ).reset_index(drop=True)

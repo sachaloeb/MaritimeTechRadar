@@ -213,17 +213,58 @@ def extract_startup(
     return aggregated
 
 
+def _zero_page_row(
+    slug: str, name: str, scoring_cfg: ScoringConfig
+) -> dict:
+    """Produce a placeholder row for a start-up with zero usable pages.
+
+    Forces an explicit human decision (exclude with reason, or add pages).
+    """
+    row: dict = {
+        "slug": slug,
+        "name": name,
+        "page_title": "",
+        "meta_description": "",
+        "text_snippet": "",
+        "source_urls": "",
+        "source_fetched_at": "",
+        "source_statuses": "",
+        "source_count": 0,
+        "distinct_pages": 0,
+    }
+    for crit_name in scoring_cfg.criteria:
+        row[f"{crit_name}_hits"] = 0
+        row[f"{crit_name}_matched"] = ""
+    for quad_name in scoring_cfg.quadrants:
+        row[f"{quad_name}_hits"] = 0
+        row[f"{quad_name}_matched"] = ""
+    row["notes"] = "no usable pages: see collection_report.csv"
+    return row
+
+
 def extract_all(
     collected: dict[str, list[Path]],
     scoring_cfg: ScoringConfig,
     slug_to_name: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Extract structured data for all start-ups."""
+    """Extract structured data for all start-ups.
+
+    Start-ups with zero usable pages still get a row (source_count=0)
+    so they appear in the review sheet and force an explicit decision.
+    """
     slug_to_name = slug_to_name or {}
     rows = []
     for slug, paths in collected.items():
         name = slug_to_name.get(slug, slug)
+        if not paths:
+            rows.append(_zero_page_row(slug, name, scoring_cfg))
+            logger.warning(
+                "Zero usable pages for %s — placeholder row added", slug
+            )
+            continue
         row = extract_startup(slug, name, paths, scoring_cfg)
         if row is not None:
             rows.append(row)
+        else:
+            rows.append(_zero_page_row(slug, name, scoring_cfg))
     return rows

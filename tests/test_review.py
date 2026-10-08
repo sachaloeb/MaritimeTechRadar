@@ -43,9 +43,12 @@ class TestGenerateReviewSheet:
         out = tmp_path / "review.csv"
         generate_review_sheet(_sample_rows(), output_path=out)
 
-        # Simulate human review
+        # Simulate human review — use explicit str/float dtypes to avoid
+        # FutureWarning about incompatible dtype assignment
         df = pd.read_csv(out)
-        df.loc[df["slug"] == "alpha", "reviewed"] = True
+        df["notes"] = df["notes"].astype(str)
+        df["reviewed"] = df["reviewed"].astype(str)
+        df.loc[df["slug"] == "alpha", "reviewed"] = "true"
         df.loc[df["slug"] == "alpha", "maritime_relevance_override"] = 4.0
         df.loc[df["slug"] == "alpha", "notes"] = "Looks good"
         df.to_csv(out, index=False)
@@ -127,6 +130,7 @@ class TestLoadReviewSheet:
         df = pd.read_csv(out)
         df["reviewed"] = df["reviewed"].astype(str)
         df["excluded"] = df["excluded"].astype(str)
+        df["exclusion_reason"] = df["exclusion_reason"].astype(str)
         df.loc[0, "reviewed"] = "true"
         df.loc[0, "excluded"] = "true"
         df.loc[0, "exclusion_reason"] = "test reason"

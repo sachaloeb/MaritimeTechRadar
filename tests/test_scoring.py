@@ -241,7 +241,8 @@ class TestScoreDataframe:
         pending = result[result["slug"] == "pending-co"].iloc[0]
         assert pending["ring"] == "Unreviewed"
 
-    def test_excluded_rows_never_in_output(self, cfg):
+    def test_excluded_rows_have_excluded_ring(self, cfg):
+        """Excluded rows appear in output with ring='Excluded', no scores."""
         rows = [
             _make_row(slug="good"),
             _make_row(slug="bad", excluded=True, reviewed=True),
@@ -249,4 +250,7 @@ class TestScoreDataframe:
         result = score_dataframe(
             pd.DataFrame(rows), cfg, include_unreviewed=True
         )
-        assert "bad" not in result["slug"].values
+        assert "bad" in result["slug"].values
+        bad = result[result["slug"] == "bad"].iloc[0]
+        assert bad["ring"] == "Excluded"
+        assert pd.isna(bad["total_score"])

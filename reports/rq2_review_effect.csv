@@ -1,0 +1,6 @@
+slug,auto_score,reviewed_score,auto_ring,reviewed_ring,ring_changed,auto_rank,reviewed_rank,rank_change,spearman_rho
+orca-ai,79.33,79.33,Pilot-ready,Pilot-ready,False,1.0,1.0,0,1.0000
+portchain,69.33,69.33,Promising,Promising,False,2.0,2.0,0,1.0000
+cydome,60.17,60.17,Promising,Promising,False,3.0,3.0,0,1.0000
+searoutes,51.04,51.04,Promising,Promising,False,4.0,4.0,0,1.0000
+norsepower,41.79,41.79,Early,Early,False,5.0,5.0,0,1.0000

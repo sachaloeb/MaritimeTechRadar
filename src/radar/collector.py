@@ -33,10 +33,17 @@ FETCHED = "fetched"
 CACHE_HIT = "cache_hit"
 CACHED_FAILURE = "cached_failure"
 ROBOTS_DENIED = "robots_denied"
+ROBOTS_UNREACHABLE = "robots_unreachable"
 DENYLIST = "denylist"
 HTTP_ERROR = "http_error"
 NETWORK_ERROR = "network_error"
 NO_CACHE = "no_cache"
+
+# Outcomes that count as "failed or blocked" (no usable page produced)
+FAILED_OR_BLOCKED = frozenset({
+    ROBOTS_DENIED, ROBOTS_UNREACHABLE, DENYLIST,
+    HTTP_ERROR, NETWORK_ERROR, CACHED_FAILURE, NO_CACHE,
+})
 
 
 @dataclass(frozen=True)
@@ -63,15 +70,19 @@ def _is_denied(url: str, denylist: list[str]) -> bool:
     return False
 
 
-_robots_cache: dict[str, RobotFileParser | None] = {}
+_robots_cache: dict[str, tuple[str, RobotFileParser | None]] = {}
 
 
-def _check_robots(url: str) -> bool:
-    """Return True if robots.txt allows fetching this URL.
+_ROBOTS_ALLOW = "allow"
+_ROBOTS_DENY_POLICY = "deny_policy"
+_ROBOTS_UNREACHABLE = "unreachable"
 
-    Fetches robots.txt through the same rate limiter with project User-Agent.
-    Conservative: 5xx or network errors -> disallow for this run (never cached).
-    404/410 -> allow. 401/403 -> disallow.
+
+def _check_robots(url: str) -> str:
+    """Check robots.txt for *url*.
+
+    Returns one of: _ROBOTS_ALLOW, _ROBOTS_DENY_POLICY, _ROBOTS_UNREACHABLE.
+    Network/timeout errors are distinct from policy denials (G4 fix).
     """
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
@@ -86,38 +97,48 @@ def _check_robots(url: str) -> bool:
                 allow_redirects=True,
             )
             if resp.status_code in (404, 410):
-                logger.debug("robots.txt not found (%d) for %s, allowing", resp.status_code,
-                             parsed.netloc)
-                _robots_cache[robots_url] = None
+                logger.debug(
+                    "robots.txt not found (%d) for %s, allowing",
+                    resp.status_code, parsed.netloc,
+                )
+                _robots_cache[robots_url] = (_ROBOTS_ALLOW, None)
             elif resp.status_code in (401, 403):
-                logger.warning("robots.txt returned %d for %s, disallowing all",
-                               resp.status_code, parsed.netloc)
+                logger.warning(
+                    "robots.txt returned %d for %s, disallowing all",
+                    resp.status_code, parsed.netloc,
+                )
                 rp = RobotFileParser()
                 rp.parse(["User-agent: *", "Disallow: /"])
-                _robots_cache[robots_url] = rp
+                _robots_cache[robots_url] = (_ROBOTS_DENY_POLICY, rp)
             elif resp.status_code >= 500:
-                logger.warning("robots.txt returned %d for %s, disallowing (conservative)",
-                               resp.status_code, parsed.netloc)
+                logger.warning(
+                    "robots.txt returned %d for %s, disallowing (conservative)",
+                    resp.status_code, parsed.netloc,
+                )
                 rp = RobotFileParser()
                 rp.parse(["User-agent: *", "Disallow: /"])
-                _robots_cache[robots_url] = rp
+                _robots_cache[robots_url] = (_ROBOTS_DENY_POLICY, rp)
             else:
                 rp = RobotFileParser()
                 rp.parse(resp.text.splitlines())
-                _robots_cache[robots_url] = rp
+                _robots_cache[robots_url] = (_ROBOTS_ALLOW, rp)
         except requests.RequestException as exc:
             logger.warning(
-                "Could not fetch robots.txt for %s (%s), disallowing (conservative)",
+                "Could not fetch robots.txt for %s (%s), "
+                "disallowing (conservative, robots_unreachable)",
                 parsed.netloc, exc,
             )
-            rp = RobotFileParser()
-            rp.parse(["User-agent: *", "Disallow: /"])
-            _robots_cache[robots_url] = rp
+            # Network failure — never cached, returns ROBOTS_UNREACHABLE
+            return _ROBOTS_UNREACHABLE
 
-    rp = _robots_cache[robots_url]
+    status, rp = _robots_cache[robots_url]
+    if status == _ROBOTS_DENY_POLICY:
+        if rp is None:
+            return _ROBOTS_DENY_POLICY
+        return _ROBOTS_DENY_POLICY if not rp.can_fetch(USER_AGENT, url) else _ROBOTS_ALLOW
     if rp is None:
-        return True
-    return rp.can_fetch(USER_AGENT, url)
+        return _ROBOTS_ALLOW
+    return _ROBOTS_ALLOW if rp.can_fetch(USER_AGENT, url) else _ROBOTS_DENY_POLICY
 
 
 _last_request_time: dict[str, float] = {}
@@ -234,8 +255,12 @@ def collect_url(
                 None,
             )
 
-    if not _check_robots(url):
-        logger.info("SKIP (robots.txt): %s [%s]", url, slug)
+    robots_result = _check_robots(url)
+    if robots_result == _ROBOTS_UNREACHABLE:
+        logger.info("SKIP (robots.txt unreachable): %s [%s]", url, slug)
+        return CollectResult(slug, url, ROBOTS_UNREACHABLE, None, now, None)
+    if robots_result == _ROBOTS_DENY_POLICY:
+        logger.info("SKIP (robots.txt denied): %s [%s]", url, slug)
         return CollectResult(slug, url, ROBOTS_DENIED, None, now, None)
 
     try:

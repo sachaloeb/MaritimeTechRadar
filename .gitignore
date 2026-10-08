@@ -217,13 +217,18 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Project-specific: raw and interim data are gitignored; processed is committed
-data/raw/
-data/interim/
+# Project-specific
+# Raw cache (HTML/JSON) is ignored; provenance manifest is tracked
+data/raw/*
+!data/raw/MANIFEST.csv
+# Interim and review CSVs are tracked (human evidence + provenance)
+# Demo data, backups, caches, logs are ignored
 data/demo/
+data/review/backups/
 logs/
-data/review/review_sheet.csv
+# Private working notes (not public)
 CLAUDE.md
 docs/
-data/review/backups/
-reports/
+# Demo reports are ignored; real reports/ is tracked
+reports/demo/
+data/interim/

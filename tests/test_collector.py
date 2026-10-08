@@ -13,11 +13,13 @@ from radar.collector import (
     CACHE_HIT,
     CACHED_FAILURE,
     DENYLIST,
+    FAILED_OR_BLOCKED,
     FETCHED,
     HTTP_ERROR,
     NETWORK_ERROR,
     NO_CACHE,
     ROBOTS_DENIED,
+    ROBOTS_UNREACHABLE,
     _is_denied,
     collect_all,
     collect_url,
@@ -29,7 +31,7 @@ from radar.config import ScoringConfig, StartupsConfig
 @pytest.fixture(autouse=True)
 def _isolate_collector(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Redirect raw_dir to temp and clear caches."""
-    monkeypatch.setattr("radar.collector._robots_cache", {})
+    monkeypatch.setattr("radar.collector._robots_cache", {})  # type: ignore[arg-type]
     monkeypatch.setattr("radar.collector._last_request_time", {})
     monkeypatch.setattr("radar.collector.RATE_LIMIT_SECONDS", 0.0)
     monkeypatch.setattr("radar.paths._PROJECT_ROOT", tmp_path)
@@ -191,6 +193,23 @@ class TestCollectUrl:
         page_call = responses.calls[-1]
         assert "maritime-tech-radar" in page_call.request.headers["User-Agent"]
         assert "@" in page_call.request.headers["User-Agent"]
+
+    @responses.activate
+    def test_robots_network_error_gives_unreachable(self):
+        """G4: robots.txt network failure is ROBOTS_UNREACHABLE, not ROBOTS_DENIED."""
+        url = "https://example.com/page"
+        responses.add(
+            responses.GET, "https://example.com/robots.txt",
+            body=responses.ConnectionError("timeout"),
+        )
+
+        cr = collect_url("test", url, [])
+        assert cr.outcome == ROBOTS_UNREACHABLE
+
+    def test_failed_or_blocked_includes_unreachable(self):
+        """G4: ROBOTS_UNREACHABLE is in FAILED_OR_BLOCKED set."""
+        assert ROBOTS_UNREACHABLE in FAILED_OR_BLOCKED
+        assert ROBOTS_DENIED in FAILED_OR_BLOCKED
 
     @responses.activate
     def test_redirect_to_denylisted_host(self):

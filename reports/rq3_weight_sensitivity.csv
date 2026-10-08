@@ -1,0 +1,10 @@
+criterion,delta,new_weight,clipped,rank_changes,max_rank_shift,ring_changes,spearman_vs_baseline
+maritime_relevance,-0.1,0.2,False,0,0,0,1.0000
+maritime_relevance,0.1,0.4,False,0,0,0,1.0000
+theme_fit,-0.1,0.15,False,0,0,1,1.0000
+theme_fit,0.1,0.35,False,0,0,1,1.0000
+maturity_signals,-0.1,0.15,False,0,0,0,1.0000
+maturity_signals,0.1,0.35,False,0,0,1,1.0000
+evidence_quality,-0.1,0.1,False,0,0,1,1.0000
+evidence_quality,0.1,0.3,False,0,0,0,1.0000
+SUMMARY,,,,0,,4,0/8 scenarios with rank change
