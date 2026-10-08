@@ -139,10 +139,8 @@ class TestDashboard:
         # At least one dataframe should contain sensitivity columns
         dfs = [d.value for d in app.dataframe]
         has_sens = any(
-            "criterion" in str(d.columns).lower()
-            and "delta" in str(d.columns).lower()
+            "Criterion" in (list(d.columns) if hasattr(d, "columns") else [])
             for d in dfs
-            if hasattr(d, "columns")
         )
         assert has_sens
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import socket
 from pathlib import Path
 
@@ -20,6 +21,24 @@ def _deny_socket(*args, **kwargs):
 def _block_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Autouse fixture: any real socket.create_connection call fails the test."""
     monkeypatch.setattr(socket, "create_connection", _deny_socket)
+
+
+# ── Redirect log dir to tmp ────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _redirect_log_dir(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Prevent tests from creating logs/ in the repo root."""
+    import radar.logging_setup as ls
+
+    tmp_log = tmp_path_factory.mktemp("logs")
+    ls.LOG_DIR = tmp_log
+    ls.LOG_FILE = tmp_log / "radar.log"
+    # Clear any handlers that might already point to the real path
+    root = logging.getLogger()
+    root.handlers.clear()
+    yield  # type: ignore[misc]
+    root.handlers.clear()
 
 
 # ── Protected-state guard ──────────────────────────────────────────────────

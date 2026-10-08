@@ -221,7 +221,10 @@ __marimo__/
 # Raw cache (HTML/JSON) is ignored; provenance manifest is tracked
 data/raw/*
 !data/raw/MANIFEST.csv
-# Interim and review CSVs are tracked (human evidence + provenance)
+# Interim CSVs (extracted.csv, collection_report.csv) are tracked for provenance
+data/interim/*
+!data/interim/extracted.csv
+!data/interim/collection_report.csv
 # Demo data, backups, caches, logs are ignored
 data/demo/
 data/review/backups/
@@ -231,4 +234,3 @@ CLAUDE.md
 docs/
 # Demo reports are ignored; real reports/ is tracked
 reports/demo/
-data/interim/

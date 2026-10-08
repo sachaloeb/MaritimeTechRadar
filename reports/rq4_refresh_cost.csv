@@ -4,5 +4,5 @@ pages_cache_hit,10
 pages_failed_or_blocked,0
 pages_usable_total,10
 reproducibility,identical (extracted + radar)
-extracted_csv_hash,084d932f510abea1
-radar_csv_hash,65195f7c907aea9a
+extracted_csv_hash,1d3d72759c81ca7a
+radar_csv_hash,612b766f63fed2bc

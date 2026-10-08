@@ -1,0 +1,11 @@
+slug,url,outcome,http_status,fetched_at,cache_path
+cydome,https://www.cydome.io,cache_hit,200,2026-10-07T18:02:09.474336+00:00,data/raw/a17903b528ba088e.json
+cydome,https://www.cydome.io/about,cache_hit,200,2026-10-07T18:02:11.406461+00:00,data/raw/3b42aa96c8d566be.json
+norsepower,https://www.norsepower.com,cache_hit,200,2026-10-07T18:02:00.236330+00:00,data/raw/51d497552a43ecab.json
+norsepower,https://www.norsepower.com/norsepower/,cache_hit,200,2026-10-07T18:02:02.319721+00:00,data/raw/bb579ac46702ab54.json
+orca-ai,https://www.orca-ai.io,cache_hit,200,2026-10-07T18:02:04.532500+00:00,data/raw/4efdf31c04f6662e.json
+orca-ai,https://www.orca-ai.io/about,cache_hit,200,2026-10-07T18:02:06.523897+00:00,data/raw/91f759976cd56735.json
+portchain,https://portchain.com,cache_hit,200,2026-10-07T18:01:50.982506+00:00,data/raw/58220e5de81acd5c.json
+portchain,https://portchain.com/about-us-portchain,cache_hit,200,2026-10-07T18:01:52.938246+00:00,data/raw/d655bb5b4e76171f.json
+searoutes,https://searoutes.com,cache_hit,200,2026-10-07T18:01:55.066604+00:00,data/raw/93da554529fa36be.json
+searoutes,https://searoutes.com/about,cache_hit,200,2026-10-07T18:01:57.135892+00:00,data/raw/71de45912f1eb94b.json

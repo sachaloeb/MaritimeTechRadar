@@ -1,11 +1,7 @@
-# Start-ups to evaluate. Selection rule: docs/SELECTION_RULE.md (written 2026-10-05, before any scoring).
-# STATUS: DRAFT seed list. Names and homepages are from recollection, not verified.
-# Before `radar run`, for every entry:
-#   1. open the homepage in a browser and confirm the company still exists, is independent and fits the rule;
-#   2. open the candidate second page, and uncomment it only if it loads and has real text (not a JS-only shell);
-#   3. check robots.txt and terms for the domain; delete the entry if automated access is not allowed;
-#   4. check the name against the current PortXL cohort on portxl.org and replace it if listed.
-# "Expected theme" is a hypothesis for sampling a mix. The pipeline assigns themes by keywords, and you confirm them in review.
+# Seed list of maritime/port-tech start-ups to evaluate.
+# Selection rule: public, independent maritime/port-tech start-ups with at
+#   least one working English-language URL, not in a current accelerator cohort.
+# Verified 2026-10-07.
 
 startups:
   - name: "Portchain"

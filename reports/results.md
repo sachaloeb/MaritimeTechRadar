@@ -1,6 +1,6 @@
 # Results (Real data, n=5)
 
-Data as of: 2026-10-07T16:49:43.994617+00:00. Exploratory analysis only — sample size is too small for statistical claims.
+Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — sample size is too small for statistical claims.
 
 ## RQ1: Coverage
 
@@ -47,8 +47,8 @@ RQ2 is trivial for this snapshot: no criterion overrides were applied, so automa
 | pages_failed_or_blocked | 0 |
 | pages_usable_total | 10 |
 | reproducibility | identical (extracted + radar) |
-| extracted_csv_hash | 084d932f510abea1 |
-| radar_csv_hash | 65195f7c907aea9a |
+| extracted_csv_hash | 1d3d72759c81ca7a |
+| radar_csv_hash | 612b766f63fed2bc |
 
 ## Limitations
 

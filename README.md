@@ -1,110 +1,174 @@
 # Maritime Tech Radar
 
-A config-driven pipeline and single-page Streamlit dashboard that ranks a handful of public maritime/port-tech start-ups on a technology radar.
+[![CI](https://github.com/sachaloeb/MaritimeTechRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/sachaloeb/MaritimeTechRadar/actions)
+
+A config-driven pipeline and single-page Streamlit dashboard that ranks a handful of public maritime/port-tech start-ups on a technology radar. Built as an independent work sample for a Data & Research internship.
+
+![Dashboard demo](assets/dashboard_demo.png)
 
 ## Quick start
 
 ```bash
-# Install (requires Python 3.11+ and uv)
+# Requires Python 3.11+ and uv
 make install
 
-# Run the demo (synthetic data)
+# Run the pipeline on synthetic data and open the dashboard
 make demo
-make demo-app    # opens the dashboard at http://localhost:8501
+make demo-app          # opens http://localhost:8501
 ```
 
 ## Real-data workflow
 
-1. **Configure:** add 5–8 start-ups to `configs/startups.yaml`:
-   ```yaml
-   startups:
-     - name: "Example Marine"
-       slug: "example-marine"
-       urls:
-         - "https://examplemarine.com"
-         - "https://examplemarine.com/about"
-       notes: "Optional notes"
-   ```
+1. **Configure start-ups** in `configs/startups.yaml` (5-8 entries, 1-3 URLs each).
 
-2. **Collect & extract:**
+2. **Collect and extract:**
    ```bash
-   uv run radar run
+   make run               # fetches pages, extracts features, writes review sheet
    ```
-   This fetches the listed URLs (respecting robots.txt, rate limits, and the denylist), extracts structured data, and writes a review sheet to `data/review/review_sheet.csv`.
+   The collector respects `robots.txt`, enforces a 2 s/host rate limit, and skips denylisted domains.
 
-3. **Review (human step):** open `data/review/review_sheet.csv` in a spreadsheet editor. For each row:
-   - Verify the extracted data is accurate
-   - Optionally fill in override columns (`maritime_relevance_override`, `theme_override`, etc.)
-   - Set `reviewed` to `true` for rows you approve
+3. **Human review:** open `data/review/review_sheet.csv` in any spreadsheet editor.
+   - Verify each row's extracted data against the source URL.
+   - Optionally set score overrides (`maritime_relevance_override`, etc.) or `theme_override`.
+   - Record `review_minutes` and any `notes`.
+   - Mark `reviewed = true` for each approved row; mark unwanted rows `excluded = true` with an `exclusion_reason`.
 
-4. **Score:**
+4. **Score and view:**
    ```bash
-   uv run radar score
+   make reproduce         # re-extract from cache + score (offline, deterministic)
+   make app               # dashboard at http://localhost:8501
    ```
-   This scores only reviewed rows and writes `data/processed/radar.csv`.
 
-5. **Dashboard:**
+5. **Analyse:**
    ```bash
-   make app
+   make analyse           # writes reports/results.md and per-RQ CSVs
    ```
+
+## Selection rule
+
+Start-ups are selected before any scoring, using a fixed rule: the company must be public, independent, operating in maritime or port technology, have at least one working English-language URL, and not appear in a current accelerator cohort. The seed list in `configs/startups.yaml` was verified on 2026-10-07.
 
 ## Scoring method
 
-Each start-up is scored on four criteria (0–5 each), weighted and summed to a total score (0–100):
+Each start-up is scored on four criteria (0-5 each), weighted and summed to a total (0-100):
 
 | Criterion | Weight | Method |
 |-----------|--------|--------|
-| Maritime relevance | 0.30 | Keyword hits from page text |
-| Theme fit | 0.25 | Keyword hits matching quadrant themes |
-| Maturity signals | 0.25 | Keywords: pilot, customer, funding, etc. |
-| Evidence quality | 0.20 | Keywords: case study, whitepaper, etc. |
+| Maritime Relevance | 0.30 | Whole-word keyword hits |
+| Theme Fit | 0.25 | Derived from best quadrant keyword hits |
+| Maturity Signals | 0.25 | Whole-word keyword hits |
+| Evidence Quality | 0.20 | Distinct pages + evidence keyword hits |
 
-**Rings:** ≥70 "Pilot-ready", 50–69 "Promising", 30–49 "Early", <30 "Watch".
+`total = 100 * sum(w_i * s_i / 5)` where `s_i = min(5, 5 * hits / saturation)`.
 
-**Themes (quadrants):** Decarbonisation & Energy, Digitalisation & AI, Logistics & Operations, Safety & Security. Assigned by highest keyword hit count; ties go to the alphabetically first theme.
+**Rings** (from `configs/scoring.yaml`): >=70 Pilot-ready, 50-69 Promising, 30-49 Early, <30 Watch.
 
-Reviewer overrides (filled in during the human review step) always take precedence over automatic scores.
+**Themes (quadrants):** Decarbonisation & Energy, Digitalisation & AI, Logistics & Operations, Safety & Security. Assigned by highest quadrant keyword count; ties go alphabetically. Themes are configurable in `configs/scoring.yaml`.
 
-All scoring parameters are editable in `configs/scoring.yaml`.
+Reviewer overrides always take precedence over automatic scores. All scoring parameters, keywords, weights, and saturation values are editable in `configs/scoring.yaml`.
 
 ## Limitations
 
-- **Heuristic keyword scoring** — not a substitute for expert evaluation.
-- **Small sample size** — designed for n=5–8 start-ups.
-- **Public sources only** — no proprietary databases, no login-walled content.
-- **Point-in-time snapshot** — data is only as current as the last fetch.
-- **No LLM calls** — scoring is deterministic and rule-based.
+- **Heuristic keyword scoring** is not a substitute for expert evaluation.
+- **Small sample size** (n=5-8): results are exploratory, not statistically significant.
+- **Public sources only**: no proprietary databases or login-walled content.
+- **Context-blind matching**: navigation labels, footers, and bios can produce false positives.
+- **Point-in-time snapshot**: data is only as current as the last fetch.
+- Scoring is deterministic and rule-based; no LLM or ML model is involved.
 
 ## Data provenance
 
-Every fact shown in the dashboard carries:
-- The source URL it was extracted from
-- The date it was fetched
-- Whether it was human-reviewed
-
-The pipeline never invents, fabricates, or hallucinates data. Test fixtures use synthetic HTML pages and are clearly marked as `dataset_kind="demo"` with a prominent banner.
+Every fact shown in the dashboard carries the source URL it was extracted from, the date it was fetched, and whether it was human-reviewed. Raw cached pages are stored in `data/raw/` (gitignored); provenance metadata is tracked in `data/raw/MANIFEST.csv`. Test fixtures use synthetic HTML and are labelled `dataset_kind="demo"` with a prominent banner.
 
 ## Development
 
 ```bash
-make test        # run pytest
-make lint        # run ruff
-make demo        # run pipeline on synthetic fixtures
+make test              # pytest (142 tests, all offline)
+make lint              # ruff (E, F, W, I)
+make check             # lint + test in one step
+make status            # per-start-up pipeline status
+make bench             # timing benchmark (determinism tests)
 ```
 
 ## Deployment
 
-The dashboard only needs `data/processed/radar.csv` to run. No scraping is required at deploy time:
+The dashboard only needs `data/processed/radar.csv` to run:
 
 ```bash
 streamlit run app/dashboard.py --server.headless true
 ```
 
-## Design decisions
+Set `RADAR_CSV` to point to a different file if needed.
 
-- **stdlib argparse** instead of click/typer to stay within the allowed dependency list.
-- **`reviewed` column as a gate** — the scorer refuses to score unreviewed rows. This ensures the human review step cannot be skipped.
-- **Deterministic jitter** on the radar chart (hash-based) so start-ups don't overlap but positions are stable across runs.
+## Non-affiliation
+
+This project is an independent work sample. It is not affiliated with, endorsed by, or produced for any company, accelerator, or programme.
+
+<!-- SNAPSHOT:START --> n=5, data as of 2026-10-07T18:02:11.406461+00:00, dataset: real <!-- SNAPSHOT:END -->
+
+<!-- RESULTS:START -->
+
+# Results (Real data, n=5)
+
+Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — sample size is too small for statistical claims.
+
+## RQ1: Coverage
+
+| criterion | share_overridden | mean_auto_score | mean_reviewed_score |
+| --- | --- | --- | --- |
+| maritime_relevance | 0.0 | 3.0 | 3.0 |
+| theme_fit | 0.0 | 4.5 | 4.5 |
+| maturity_signals | 0.0 | 1.8333 | 1.8333 |
+| evidence_quality | 0.0 | 2.6667 | 2.6667 |
+| theme | 0.0 |  |  |
+
+## RQ2: Review effect
+
+RQ2 is trivial for this snapshot: no criterion overrides were applied, so automatic and reviewed scores are identical.
+
+| slug | auto_score | reviewed_score | auto_ring | reviewed_ring | ring_changed | auto_rank | reviewed_rank | rank_change | spearman_rho |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| orca-ai | 79.33 | 79.33 | Pilot-ready | Pilot-ready | False | 1.0 | 1.0 | 0 | 1.0000 |
+| portchain | 69.33 | 69.33 | Promising | Promising | False | 2.0 | 2.0 | 0 | 1.0000 |
+| cydome | 60.17 | 60.17 | Promising | Promising | False | 3.0 | 3.0 | 0 | 1.0000 |
+| searoutes | 51.04 | 51.04 | Promising | Promising | False | 4.0 | 4.0 | 0 | 1.0000 |
+| norsepower | 41.79 | 41.79 | Early | Early | False | 5.0 | 5.0 | 0 | 1.0000 |
+
+## RQ3: Weight sensitivity
+
+| criterion | delta | new_weight | clipped | rank_changes | max_rank_shift | ring_changes | spearman_vs_baseline |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| maritime_relevance | -0.1 | 0.2 | False | 0 | 0 | 0 | 1.0000 |
+| maritime_relevance | 0.1 | 0.4 | False | 0 | 0 | 0 | 1.0000 |
+| theme_fit | -0.1 | 0.15 | False | 0 | 0 | 1 | 1.0000 |
+| theme_fit | 0.1 | 0.35 | False | 0 | 0 | 1 | 1.0000 |
+| maturity_signals | -0.1 | 0.15 | False | 0 | 0 | 0 | 1.0000 |
+| maturity_signals | 0.1 | 0.35 | False | 0 | 0 | 1 | 1.0000 |
+| evidence_quality | -0.1 | 0.1 | False | 0 | 0 | 1 | 1.0000 |
+| evidence_quality | 0.1 | 0.3 | False | 0 | 0 | 0 | 1.0000 |
+| SUMMARY |  |  |  | 0 |  | 4 | 0/8 scenarios with rank change |
+
+## RQ4: Refresh cost
+
+| metric | value |
+| --- | --- |
+| review_minutes | not recorded |
+| pages_cache_hit | 10 |
+| pages_failed_or_blocked | 0 |
+| pages_usable_total | 10 |
+| reproducibility | identical (extracted + radar) |
+| extracted_csv_hash | 1d3d72759c81ca7a |
+| radar_csv_hash | 612b766f63fed2bc |
+
+## Limitations
+
+- Keyword matching is context-blind: navigation labels, footers and bios can match.
+- theme_fit saturates quickly from a single quadrant.
+- Maturity vocabulary is narrow.
+- Human overrides exist for exactly this reason.
+- Sample size is exploratory (n=5-8), no statistical power.
+
+<!-- RESULTS:END -->
 
 ## License
 
