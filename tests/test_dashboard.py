@@ -19,7 +19,7 @@ def _demo_radar_df() -> pd.DataFrame:
                 "source_fetched_at": "2026-01-15T12:00:00+00:00",
                 "source_statuses": "200",
                 "source_count": 2,
-                "distinct_pages": 2,
+                "evidence_quality_pages": 1,
                 "maritime_relevance_hits": 8,
                 "theme_fit_hits": 4,
                 "maturity_signals_hits": 3,
@@ -57,7 +57,7 @@ def _demo_radar_df() -> pd.DataFrame:
                 "source_fetched_at": "2026-01-15T12:00:00+00:00",
                 "source_statuses": "200",
                 "source_count": 2,
-                "distinct_pages": 2,
+                "evidence_quality_pages": 1,
                 "maritime_relevance_hits": 3,
                 "theme_fit_hits": 2,
                 "maturity_signals_hits": 1,
@@ -171,6 +171,11 @@ class TestDashboardExtended:
         captions = [str(c.value) for c in app.caption]
         assert any("70" in c and "Pilot-ready" in c for c in captions)
 
+    def test_radar_caption_present(self, app):
+        """Radar has the interpretation caption."""
+        captions = [str(c.value) for c in app.caption]
+        assert any("Distance from the centre" in c for c in captions)
+
     def test_download_button_present(self, app):
         # Streamlit AppTest doesn't have a direct download_button accessor,
         # but the dashboard should not raise and should have sidebar content
@@ -205,6 +210,13 @@ class TestDashboardExtended:
         at = AppTest.from_file(dashboard_path, default_timeout=30)
         at.run()
         assert not at.exception, f"Dashboard raised: {at.exception}"
+
+    def test_evidence_quality_decomposition(self, app):
+        """'Why this score?' shows 'hits = pages + keywords' for evidence quality."""
+        all_md = " ".join(str(m.value) for m in app.markdown)
+        # Alpha: evidence_quality_pages=1, hits=2, matched="case study" → 1 keyword
+        # → "2 hits = 1 page + 1 keyword"
+        assert "hits =" in all_md
 
     def test_unreviewed_toggle(self, tmp_path: Path, monkeypatch):
         """Unreviewed rows appear when toggled on."""
@@ -295,6 +307,48 @@ class TestResetWeights:
         assert not at.exception
         reset_btn.click().run()
         assert not at.exception
+
+
+class TestRadarChartDirect:
+    """Unit tests for radar_chart — load without running main()."""
+
+    @pytest.fixture(scope="class")
+    def radar_chart_fn(self):
+        """Exec the dashboard source (minus the trailing main() call) and
+        return the radar_chart function so it can be tested without starting
+        a full Streamlit session."""
+        import unittest.mock as mock
+
+        path = Path(__file__).resolve().parent.parent / "app" / "dashboard.py"
+        source = path.read_text()
+        lines = source.rstrip().split("\n")
+        assert lines[-1].strip() == "main()", (
+            f"Expected 'main()' as last line, got: {lines[-1]!r}"
+        )
+        stripped = "\n".join(lines[:-1])
+
+        globs: dict = {"__name__": "__test__", "__file__": str(path)}
+        with mock.patch("streamlit.set_page_config"):
+            exec(compile(stripped, str(path), "exec"), globs)  # noqa: S102
+
+        return globs["radar_chart"]
+
+    def test_legend_has_four_rings_only(self, radar_chart_fn):
+        """Companies are hidden from the legend; only the four rings appear."""
+        fig, _ = radar_chart_fn(_demo_radar_df())
+        legend_entries = [t.name for t in fig.data if t.showlegend]
+        assert set(legend_entries) == {
+            "Pilot-ready", "Promising", "Early", "Watch"
+        }, f"Legend shows: {legend_entries!r}"
+
+    def test_company_traces_not_in_legend(self, radar_chart_fn):
+        """No per-company trace should have showlegend=True."""
+        df = _demo_radar_df()
+        fig, _ = radar_chart_fn(df)
+        company_names = set(df["name"].astype(str))
+        in_legend = {t.name for t in fig.data if t.showlegend}
+        overlap = company_names & in_legend
+        assert not overlap, f"Company names in legend: {overlap!r}"
 
 
 class TestDashboardMissingCsv:

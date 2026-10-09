@@ -234,3 +234,4 @@ CLAUDE.md
 docs/
 # Demo reports are ignored; real reports/ is tracked
 reports/demo/
+.DS_Store

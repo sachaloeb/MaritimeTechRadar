@@ -245,6 +245,34 @@ def validate_state(
                 f"{row['slug']}: zero usable pages, not yet excluded"
             )
 
+    # ── Evidence quality invariant ─────────────────────────────────────────
+    if "evidence_quality_pages" not in df.columns:
+        warnings.append(
+            "evidence_quality_pages column absent from review sheet — "
+            "run `radar run --offline && radar score` to regenerate"
+        )
+    elif (
+        "evidence_quality_hits" in df.columns
+        and "evidence_quality_matched" in df.columns
+    ):
+        for _, row in df.iterrows():
+            slug = str(row.get("slug", "?"))
+            hits = row.get("evidence_quality_hits")
+            pages = row.get("evidence_quality_pages")
+            if pd.isna(hits) or pd.isna(pages):
+                continue
+            matched_raw = row.get("evidence_quality_matched", "")
+            matched_str = "" if pd.isna(matched_raw) else str(matched_raw)
+            kw_count = len([k for k in matched_str.split("|") if k.strip()])
+            expected = int(pages) + kw_count
+            actual = int(hits)
+            if actual != expected:
+                errors.append(
+                    f"{slug}: evidence_quality_hits={actual} != "
+                    f"evidence_quality_pages={int(pages)} + "
+                    f"{kw_count} keywords (expected {expected})"
+                )
+
     return errors, warnings
 
 

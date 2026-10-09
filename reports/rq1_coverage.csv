@@ -1,6 +1,6 @@
 criterion,share_overridden,mean_auto_score,mean_reviewed_score
 maritime_relevance,0.0,3.0,3.0
 theme_fit,0.0,4.5,4.5
-maturity_signals,0.0,1.8333,1.8333
-evidence_quality,0.0,2.6667,2.6667
-theme,0.0,,
+maturity_signals,0.6,1.8333,3.4333
+evidence_quality,0.4,2.6667,3.2333
+theme,0.4,,

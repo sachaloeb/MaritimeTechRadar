@@ -54,7 +54,6 @@ _PROTECTED_DIRS = [
     "data/raw",
     "data/interim",
     "data/processed",
-    "logs",
 ]
 
 

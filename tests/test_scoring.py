@@ -24,7 +24,7 @@ def _make_row(**overrides) -> dict:
         "source_fetched_at": "2026-01-15T12:00:00+00:00",
         "source_statuses": "200",
         "source_count": 1,
-        "distinct_pages": 1,
+        "evidence_quality_pages": 1,
         "maritime_relevance_hits": 5,
         "theme_fit_hits": 4,
         "maturity_signals_hits": 3,

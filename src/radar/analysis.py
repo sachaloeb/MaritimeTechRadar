@@ -234,6 +234,9 @@ def rq3_weight_sensitivity(
     base_scores = list(base_result["total_score"])
     base_ranks = _average_ranks(base_scores)
 
+    # Map slug → baseline rank (computed once; order is stable)
+    base_rank_by_slug = dict(zip(base_order, base_ranks))
+
     rows: list[dict] = []
     for crit_name in cfg.criteria:
         for delta in [-0.10, 0.10]:
@@ -262,6 +265,18 @@ def rq3_weight_sensitivity(
             alt_scores = list(alt_result["total_score"])
             alt_ranks = _average_ranks(alt_scores)
 
+            # Align scenario ranks to baseline order by slug (bug fix: was
+            # paired by position, giving rho=1 even when rankings changed)
+            alt_rank_by_slug = dict(zip(alt_order, alt_ranks))
+            paired_base = [
+                base_rank_by_slug[s]
+                for s in base_order if s in alt_rank_by_slug
+            ]
+            paired_alt = [
+                alt_rank_by_slug[s]
+                for s in base_order if s in alt_rank_by_slug
+            ]
+
             rank_changes = sum(
                 1 for a, b in zip(base_order, alt_order) if a != b
             )
@@ -285,7 +300,7 @@ def rq3_weight_sensitivity(
                 "rank_changes": rank_changes,
                 "max_rank_shift": max_shift,
                 "ring_changes": ring_changes,
-                "spearman_vs_baseline": _spearman_rho(base_ranks, alt_ranks),
+                "spearman_vs_baseline": _spearman_rho(paired_base, paired_alt),
             })
 
     # Summary row

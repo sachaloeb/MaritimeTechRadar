@@ -163,12 +163,12 @@ def extract_startup(
 
     # Deduplicate pages by content_hash for evidence_quality
     seen_hashes: set[str] = set()
-    distinct_pages = 0
+    evidence_quality_pages = 0
     for p in pages:
         ch = p.get("content_hash", "")
         if ch and ch not in seen_hashes:
             seen_hashes.add(ch)
-            distinct_pages += 1
+            evidence_quality_pages += 1
 
     first = pages[0]
 
@@ -189,7 +189,7 @@ def extract_startup(
         "source_fetched_at": source_fetched_at,
         "source_statuses": source_statuses,
         "source_count": len(pages),
-        "distinct_pages": distinct_pages,
+        "evidence_quality_pages": evidence_quality_pages,
     }
 
     # Write hits and matched columns for each criterion
@@ -208,7 +208,7 @@ def extract_startup(
     ev_crit = scoring_cfg.criteria.get("evidence_quality")
     if ev_crit and not ev_crit.derived_from:
         ev_kw_hits = len(crit_union.get("evidence_quality", set()))
-        aggregated["evidence_quality_hits"] = distinct_pages + ev_kw_hits
+        aggregated["evidence_quality_hits"] = evidence_quality_pages + ev_kw_hits
 
     return aggregated
 
@@ -230,7 +230,7 @@ def _zero_page_row(
         "source_fetched_at": "",
         "source_statuses": "",
         "source_count": 0,
-        "distinct_pages": 0,
+        "evidence_quality_pages": 0,
     }
     for crit_name in scoring_cfg.criteria:
         row[f"{crit_name}_hits"] = 0

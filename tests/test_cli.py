@@ -106,6 +106,38 @@ class TestValidate:
         errors, _ = validate_state(demo=True)
         assert any("theme_override" in e for e in errors)
 
+    def test_validate_evidence_quality_invariant_pass(self, cli_env: Path):
+        """Consistent evidence_quality_hits passes validation."""
+        main(["run", "--demo"])
+        # After demo run, evidence_quality_pages should be present and consistent
+        errors, _ = validate_state(demo=True)
+        eq_errors = [e for e in errors if "evidence_quality_hits" in e]
+        assert eq_errors == [], f"Unexpected evidence_quality errors: {eq_errors}"
+
+    def test_validate_evidence_quality_invariant_fail(self, cli_env: Path):
+        """Tampered evidence_quality_hits triggers a validation error."""
+        main(["run", "--demo"])
+        review = cli_env / "data" / "demo" / "review" / "review_sheet.csv"
+        df = pd.read_csv(review)
+        # Tamper: add 99 to the hits value to make it inconsistent
+        if "evidence_quality_hits" in df.columns:
+            df["evidence_quality_hits"] = df["evidence_quality_hits"] + 99
+            df.to_csv(review, index=False)
+        errors, _ = validate_state(demo=True)
+        assert any("evidence_quality_hits" in e for e in errors)
+
+    def test_validate_legacy_sheet_warns_not_crashes(self, cli_env: Path):
+        """Legacy sheet without evidence_quality_pages column → warning, not error."""
+        main(["run", "--demo"])
+        review = cli_env / "data" / "demo" / "review" / "review_sheet.csv"
+        df = pd.read_csv(review)
+        # Simulate legacy: drop evidence_quality_pages if present, add distinct_pages
+        if "evidence_quality_pages" in df.columns:
+            df = df.rename(columns={"evidence_quality_pages": "distinct_pages"})
+            df.to_csv(review, index=False)
+        _, warnings = validate_state(demo=True)
+        assert any("evidence_quality_pages" in w for w in warnings)
+
     def test_score_refuses_on_validation_error(self, cli_env: Path):
         main(["run", "--demo"])
         review = cli_env / "data" / "demo" / "review" / "review_sheet.csv"

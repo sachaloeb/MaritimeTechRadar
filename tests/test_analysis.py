@@ -297,3 +297,63 @@ class TestMarkerConstants:
     def test_start_end_differ(self):
         assert RESULTS_START != RESULTS_END
         assert SNAPSHOT_START != SNAPSHOT_END
+
+
+class TestRq3RhoBugFix:
+    """Regression tests for the Spearman rho slug-alignment fix."""
+
+    def test_spearman_rho_adjacent_swap_n5(self):
+        """One adjacent swap with n=5 gives rho = 0.9 (not 1.0)."""
+        from radar.analysis import _spearman_rho
+        base = [1.0, 2.0, 3.0, 4.0, 5.0]
+        swapped = [1.0, 3.0, 2.0, 4.0, 5.0]
+        rho = _spearman_rho(base, swapped)
+        assert float(rho) == pytest.approx(0.9, abs=0.001)
+
+    def test_rq3_rho_detects_rank_swap(self, cfg):
+        """rq3 rho is < 1 when a weight change causes two start-ups to swap ranks."""
+        # 5 start-ups where boosting maritime_relevance causes s1 (high mr, low mat)
+        # and s2 (lower mr, higher mat) to swap ranks.
+        def _row(slug, mr, mat):
+            return {
+                "slug": slug, "name": slug,
+                "maritime_relevance_hits": mr,
+                "theme_fit_hits": 4,
+                "maturity_signals_hits": mat,
+                "evidence_quality_hits": 2,
+                "evidence_quality_pages": 1,
+                "decarbonisation_energy_hits": 4,
+                "digitalisation_ai_hits": 0,
+                "logistics_operations_hits": 0,
+                "safety_security_hits": 0,
+                "maritime_relevance_override": "",
+                "theme_fit_override": "",
+                "maturity_signals_override": "",
+                "evidence_quality_override": "",
+                "theme_override": "",
+                "reviewed": True,
+                "excluded": False,
+                "ring": "Promising",
+            }
+
+        df = pd.DataFrame([
+            _row("s1", 10, 1),
+            _row("s2", 6, 5),
+            _row("s3", 5, 4),
+            _row("s4", 3, 3),
+            _row("s5", 1, 2),
+        ])
+        result = rq3_weight_sensitivity(df, cfg)
+
+        # Find the maritime_relevance +0.10 row
+        mr_plus = result[
+            (result["criterion"] == "maritime_relevance")
+            & (result["delta"].apply(lambda v: abs(float(v) - 0.10) < 0.001
+                                     if pd.notna(v) else False))
+        ]
+        assert not mr_plus.empty, "Expected maritime_relevance +0.10 row"
+        rho = mr_plus.iloc[0]["spearman_vs_baseline"]
+        assert rho != "1.0000", (
+            f"rho should be < 1 when a swap occurred, got {rho!r}"
+        )
+        assert float(rho) == pytest.approx(0.9, abs=0.01)

@@ -76,6 +76,15 @@ def generate_review_sheet(
         _backup_sheet(output_path)
         existing = pd.read_csv(output_path)
 
+        # Migrate legacy column name from v0 sheets
+        has_legacy = "distinct_pages" in existing.columns
+        has_new = "evidence_quality_pages" in existing.columns
+        if has_legacy and not has_new:
+            existing = existing.rename(columns={"distinct_pages": "evidence_quality_pages"})
+            logger.info("Migrated legacy 'distinct_pages' → 'evidence_quality_pages'")
+        elif has_legacy:
+            existing = existing.drop(columns=["distinct_pages"])
+
         if "slug" in existing.columns and "slug" in new_df.columns:
             # Merge: keep human columns from existing, refresh extracted
             existing_slugs = set(existing["slug"].tolist())

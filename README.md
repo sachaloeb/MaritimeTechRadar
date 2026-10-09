@@ -57,7 +57,7 @@ Each start-up is scored on four criteria (0-5 each), weighted and summed to a to
 | Maritime Relevance | 0.30 | Whole-word keyword hits |
 | Theme Fit | 0.25 | Derived from best quadrant keyword hits |
 | Maturity Signals | 0.25 | Whole-word keyword hits |
-| Evidence Quality | 0.20 | Distinct pages + evidence keyword hits |
+| Evidence Quality | 0.20 | `evidence_quality_pages` (distinct pages) + distinct evidence keyword hits |
 
 `total = 100 * sum(w_i * s_i / 5)` where `s_i = min(5, 5 * hits / saturation)`.
 
@@ -100,6 +100,25 @@ streamlit run app/dashboard.py --server.headless true
 
 Set `RADAR_CSV` to point to a different file if needed.
 
+## Columns
+
+Key columns produced by the pipeline and used in the review sheet / radar.csv:
+
+| Column | Description |
+|--------|-------------|
+| `evidence_quality_hits` | Evidence quality hits (distinct pages + distinct keywords) |
+| `evidence_quality_pages` | Count of deduplicated (by content hash) usable pages |
+| `evidence_quality_matched` | Pipe-separated evidence keywords matched (e.g. `case study\|report`) |
+| `maritime_relevance_hits` | Count of distinct maritime relevance keywords matched |
+| `maritime_relevance_matched` | Pipe-separated maritime relevance keywords matched |
+| `theme_fit_hits` | Best-quadrant keyword count (derived from highest quadrant score) |
+| `maturity_signals_hits` | Count of distinct maturity signal keywords matched |
+| `*_matched` | Pipe-separated matched keywords for the corresponding criterion or quadrant |
+| `*_override` | Reviewer override for criterion score (numeric 0–5) or theme (quadrant key) |
+
+`evidence_quality_hits = evidence_quality_pages + len(evidence_quality_matched.split("\|"))`.
+This rewards breadth (independent public pages) and proof-type language, not repetition.
+
 ## Non-affiliation
 
 This project is an independent work sample. It is not affiliated with, endorsed by, or produced for any company, accelerator, or programme.
@@ -118,21 +137,19 @@ Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — samp
 | --- | --- | --- | --- |
 | maritime_relevance | 0.0 | 3.0 | 3.0 |
 | theme_fit | 0.0 | 4.5 | 4.5 |
-| maturity_signals | 0.0 | 1.8333 | 1.8333 |
-| evidence_quality | 0.0 | 2.6667 | 2.6667 |
-| theme | 0.0 |  |  |
+| maturity_signals | 0.6 | 1.8333 | 3.4333 |
+| evidence_quality | 0.4 | 2.6667 | 3.2333 |
+| theme | 0.4 |  |  |
 
 ## RQ2: Review effect
 
-RQ2 is trivial for this snapshot: no criterion overrides were applied, so automatic and reviewed scores are identical.
-
 | slug | auto_score | reviewed_score | auto_ring | reviewed_ring | ring_changed | auto_rank | reviewed_rank | rank_change | spearman_rho |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| orca-ai | 79.33 | 79.33 | Pilot-ready | Pilot-ready | False | 1.0 | 1.0 | 0 | 1.0000 |
-| portchain | 69.33 | 69.33 | Promising | Promising | False | 2.0 | 2.0 | 0 | 1.0000 |
-| cydome | 60.17 | 60.17 | Promising | Promising | False | 3.0 | 3.0 | 0 | 1.0000 |
-| searoutes | 51.04 | 51.04 | Promising | Promising | False | 4.0 | 4.0 | 0 | 1.0000 |
-| norsepower | 41.79 | 41.79 | Early | Early | False | 5.0 | 5.0 | 0 | 1.0000 |
+| orca-ai | 79.33 | 79.33 | Pilot-ready | Pilot-ready | False | 1.0 | 1.0 | 0 | 0.9000 |
+| cydome | 60.17 | 77.0 | Promising | Pilot-ready | True | 3.0 | 2.0 | 1 | 0.9000 |
+| portchain | 69.33 | 74.67 | Promising | Pilot-ready | True | 2.0 | 3.0 | -1 | 0.9000 |
+| searoutes | 51.04 | 61.88 | Promising | Promising | False | 4.0 | 4.0 | 0 | 0.9000 |
+| norsepower | 41.79 | 60.13 | Early | Promising | True | 5.0 | 5.0 | 0 | 0.9000 |
 
 ## RQ3: Weight sensitivity
 
@@ -140,25 +157,26 @@ RQ2 is trivial for this snapshot: no criterion overrides were applied, so automa
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | maritime_relevance | -0.1 | 0.2 | False | 0 | 0 | 0 | 1.0000 |
 | maritime_relevance | 0.1 | 0.4 | False | 0 | 0 | 0 | 1.0000 |
-| theme_fit | -0.1 | 0.15 | False | 0 | 0 | 1 | 1.0000 |
-| theme_fit | 0.1 | 0.35 | False | 0 | 0 | 1 | 1.0000 |
+| theme_fit | -0.1 | 0.15 | False | 2 | 1 | 0 | 0.9000 |
+| theme_fit | 0.1 | 0.35 | False | 0 | 0 | 0 | 1.0000 |
 | maturity_signals | -0.1 | 0.15 | False | 0 | 0 | 0 | 1.0000 |
-| maturity_signals | 0.1 | 0.35 | False | 0 | 0 | 1 | 1.0000 |
-| evidence_quality | -0.1 | 0.1 | False | 0 | 0 | 1 | 1.0000 |
+| maturity_signals | 0.1 | 0.35 | False | 2 | 1 | 0 | 0.9000 |
+| evidence_quality | -0.1 | 0.1 | False | 0 | 0 | 0 | 1.0000 |
 | evidence_quality | 0.1 | 0.3 | False | 0 | 0 | 0 | 1.0000 |
-| SUMMARY |  |  |  | 0 |  | 4 | 0/8 scenarios with rank change |
+| SUMMARY |  |  |  | 2 |  | 0 | 2/8 scenarios with rank change |
 
 ## RQ4: Refresh cost
 
 | metric | value |
 | --- | --- |
-| review_minutes | not recorded |
+| mean_review_minutes | 12.6 |
+| median_review_minutes | 12.0 |
 | pages_cache_hit | 10 |
 | pages_failed_or_blocked | 0 |
 | pages_usable_total | 10 |
 | reproducibility | identical (extracted + radar) |
-| extracted_csv_hash | 1d3d72759c81ca7a |
-| radar_csv_hash | 612b766f63fed2bc |
+| extracted_csv_hash | 34db653d40170284 |
+| radar_csv_hash | 2ab36e525cd4944a |
 
 ## Limitations
 

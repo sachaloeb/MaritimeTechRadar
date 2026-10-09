@@ -148,3 +148,51 @@ class TestLoadReviewSheet:
     def test_missing_file_raises(self):
         with pytest.raises(FileNotFoundError):
             load_review_sheet(Path("/nonexistent/review.csv"))
+
+
+class TestLegacyDistinctPagesRename:
+    def test_merge_renames_distinct_pages(self, tmp_path: Path):
+        """Legacy sheet with distinct_pages → merged sheet has evidence_quality_pages."""
+        # Write an old-style sheet with distinct_pages
+        legacy_rows = [
+            {
+                "slug": "alpha", "name": "Alpha",
+                "maritime_relevance_hits": 5,
+                "distinct_pages": 2,  # legacy column
+                "source_urls": "https://alpha.example.com",
+                "source_fetched_at": "2026-01-15T12:00:00+00:00",
+                "source_statuses": "200",
+                "reviewed": "true",
+                "excluded": "false",
+                "exclusion_reason": "",
+                "maritime_relevance_override": "",
+                "theme_fit_override": "",
+                "maturity_signals_override": "",
+                "evidence_quality_override": "",
+                "theme_override": "",
+                "notes": "legacy note",
+                "review_minutes": "",
+            }
+        ]
+        out = tmp_path / "review.csv"
+        pd.DataFrame(legacy_rows).to_csv(out, index=False)
+
+        # New extracted data uses evidence_quality_pages
+        new_rows = [
+            {
+                "slug": "alpha", "name": "Alpha",
+                "maritime_relevance_hits": 6,
+                "evidence_quality_pages": 1,
+                "evidence_quality_hits": 1,
+                "source_urls": "https://alpha.example.com",
+                "source_fetched_at": "2026-01-15T12:00:00+00:00",
+                "source_statuses": "200",
+            }
+        ]
+        generate_review_sheet(new_rows, output_path=out)
+
+        result = pd.read_csv(out)
+        assert "distinct_pages" not in result.columns
+        assert "evidence_quality_pages" in result.columns
+        # Human column preserved
+        assert result.loc[result["slug"] == "alpha", "notes"].iloc[0] == "legacy note"

@@ -185,8 +185,77 @@ class TestExtractStartup:
             FIXTURES / "good_page.html", content_hash="h1",
         )
         result = extract_startup("oc", "OceanClean", [c1], scoring_cfg)
-        # 1 distinct page + evidence keywords matched
-        assert result["evidence_quality_hits"] >= 1
+        assert result is not None
+        pages = result["evidence_quality_pages"]
+        matched_str = result.get("evidence_quality_matched", "")
+        kw_count = len([k for k in matched_str.split("|") if k.strip()])
+        # hits == pages + keywords
+        assert result["evidence_quality_hits"] == pages + kw_count
+        assert pages >= 1
+
+    def test_evidence_quality_pages_1_zero_keywords(
+        self, tmp_path: Path, scoring_cfg
+    ):
+        """pages=1, 0 evidence keywords → hits=1."""
+        # malformed_page.html has no evidence keywords (case study, whitepaper…)
+        c1 = _make_cache(
+            tmp_path, "https://example.com/1",
+            FIXTURES / "malformed_page.html", content_hash="hp1",
+        )
+        result = extract_startup("co", "Co", [c1], scoring_cfg)
+        assert result is not None
+        pages = result["evidence_quality_pages"]
+        matched_str = result.get("evidence_quality_matched", "")
+        kw_count = len([k for k in matched_str.split("|") if k.strip()])
+        assert pages == 1
+        assert result["evidence_quality_hits"] == 1 + kw_count
+
+    def test_evidence_quality_pages_2_with_keywords(
+        self, tmp_path: Path, scoring_cfg
+    ):
+        """pages=2 (distinct hashes) + keywords → hits = pages + len(keywords)."""
+        c1 = _make_cache(
+            tmp_path, "https://example.com/1",
+            FIXTURES / "good_page.html", content_hash="hq1",
+        )
+        c2 = tmp_path / "page2.json"
+        import json as _json
+        c2.write_text(_json.dumps({
+            "url": "https://example.com/2",
+            "fetched_at": "2026-01-16T12:00:00+00:00",
+            "http_status": 200, "content_hash": "hq2", "error": None,
+            "content": (FIXTURES / "malformed_page.html").read_text(),
+        }), encoding="utf-8")
+        result = extract_startup("co", "Co", [c1, c2], scoring_cfg)
+        assert result is not None
+        pages = result["evidence_quality_pages"]
+        matched_str = result.get("evidence_quality_matched", "")
+        kw_count = len([k for k in matched_str.split("|") if k.strip()])
+        assert pages == 2
+        assert result["evidence_quality_hits"] == 2 + kw_count
+
+    def test_evidence_quality_duplicate_hash_counts_once(
+        self, tmp_path: Path, scoring_cfg
+    ):
+        """Duplicate content_hash → only 1 distinct page."""
+        c1 = _make_cache(
+            tmp_path, "https://example.com/1",
+            FIXTURES / "good_page.html", content_hash="same_hash",
+        )
+        c2 = tmp_path / "dup.json"
+        import json as _json
+        c2.write_text(_json.dumps({
+            "url": "https://example.com/2",
+            "fetched_at": "2026-01-16T12:00:00+00:00",
+            "http_status": 200, "content_hash": "same_hash", "error": None,
+            "content": (FIXTURES / "good_page.html").read_text(),
+        }), encoding="utf-8")
+        result = extract_startup("co", "Co", [c1, c2], scoring_cfg)
+        assert result is not None
+        assert result["evidence_quality_pages"] == 1
+        matched_str = result.get("evidence_quality_matched", "")
+        kw_count = len([k for k in matched_str.split("|") if k.strip()])
+        assert result["evidence_quality_hits"] == 1 + kw_count
 
     def test_source_columns_aligned(self, tmp_path: Path, scoring_cfg):
         c1 = _make_cache(

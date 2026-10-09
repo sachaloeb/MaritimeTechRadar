@@ -1,8 +1,9 @@
 metric,value
-review_minutes,not recorded
+mean_review_minutes,12.6
+median_review_minutes,12.0
 pages_cache_hit,10
 pages_failed_or_blocked,0
 pages_usable_total,10
 reproducibility,identical (extracted + radar)
-extracted_csv_hash,1d3d72759c81ca7a
-radar_csv_hash,612b766f63fed2bc
+extracted_csv_hash,34db653d40170284
+radar_csv_hash,2ab36e525cd4944a

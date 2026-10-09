@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from radar.columns import COLUMN_LABELS  # noqa: F401  # exported for consumers
 from radar.config import load_scoring_config
 from radar.scoring import NON_SCORED_RINGS
 
@@ -45,6 +46,29 @@ def _pretty(name: str) -> str:
 def _short_date(iso: str) -> str:
     """'2026-01-15T12:00:00+00:00' -> '2026-01-15'."""
     return iso[:10] if len(iso) >= 10 else iso
+
+
+def _short_label(label: str) -> str:
+    """Shorten theme label to fit sidebar multiselect chips."""
+    return (
+        label
+        .replace("Decarbonisation", "Decarb")
+        .replace("Digitalisation", "Digital")
+        .replace("Operations", "Ops")
+    )
+
+
+def _text_position(theta: float) -> str:
+    """Best Plotly textposition for a polar marker at angle theta (clockwise from N)."""
+    theta = theta % 360
+    if theta < 45 or theta >= 315:
+        return "top center"
+    elif theta < 135:
+        return "middle right"
+    elif theta < 225:
+        return "bottom center"
+    else:
+        return "middle left"
 
 
 # ── Data loading ─────────────────────────────────────────────────────────────
@@ -153,12 +177,15 @@ def sidebar(
         elif tid == "unassigned":
             theme_labels["unassigned"] = "Unassigned"
 
-    theme_filter = st.sidebar.multiselect(
-        "Themes",
-        options=list(theme_labels.keys()),
-        default=list(theme_labels.keys()),
-        format_func=lambda t: theme_labels.get(t, t),
-    )
+    # Use an expander so chips don't get truncated by sidebar width
+    with st.sidebar.expander("Themes", expanded=True):
+        theme_filter = st.multiselect(
+            "",
+            options=list(theme_labels.keys()),
+            default=list(theme_labels.keys()),
+            format_func=lambda t: _short_label(theme_labels.get(t, t)),
+            label_visibility="collapsed",
+        )
 
     show_unreviewed = st.sidebar.toggle("Show unreviewed", value=False)
 
@@ -231,15 +258,16 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
         theta = _deterministic_jitter(
             slug, quad_centers.get(theme, 0), sector_width
         )
-
+        tpos = _text_position(theta)
         colour = RING_COLOURS.get(ring, "#999999")
 
         fig.add_trace(go.Scatterpolar(
             r=[max(0.6, r_jitter)], theta=[theta],
             mode="markers+text",
             marker=dict(size=14, color=colour),
-            text=[name], textposition="top center",
-            textfont=dict(size=11), name=name,
+            text=[name], textposition=tpos,
+            textfont=dict(size=13), name=name,
+            showlegend=False,  # companies hidden; only ring traces in legend
             hovertext=(
                 f"{name}<br>Score: {row.get('total_score', 0)}"
                 f"<br>Ring: {ring}<br>Theme: {theme_label}"
@@ -248,7 +276,7 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
             hoverinfo="text",
         ))
 
-    # Ring colour legend — one invisible trace per ring for the legend
+    # Ring colour legend — one invisible trace per ring only
     for ring_name, colour in RING_COLOURS.items():
         fig.add_trace(go.Scatterpolar(
             r=[None], theta=[None],
@@ -260,7 +288,8 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
         polar=dict(
             radialaxis=dict(
                 visible=True, range=[0, 4.8],
-                tickvals=[1, 2, 3, 4], ticktext=RING_ORDER,
+                tickvals=[1, 2, 3, 4],
+                showticklabels=False,  # ring names shown in legend, not axis
             ),
             angularaxis=dict(
                 tickvals=[quad_centers[q] for q in quadrant_ids],
@@ -275,7 +304,7 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
             orientation="h", yanchor="top", y=-0.05,
             xanchor="center", x=0.5,
         ),
-        height=650, margin=dict(t=40, b=80),
+        height=520, margin=dict(t=40, b=80),
     )
     return fig, unassigned
 
@@ -318,8 +347,9 @@ def _compute_sensitivity(df: pd.DataFrame) -> pd.DataFrame | None:
 
 def _format_sensitivity(sens: pd.DataFrame, n: int) -> pd.DataFrame:
     """Clean up sensitivity table for display."""
+    _EM = "\u2014"
     display = sens.copy()
-    # Drop clipped column
+    # Drop clipped column (internal detail)
     if "clipped" in display.columns:
         display = display.drop(columns=["clipped"])
     # Rename columns for readability
@@ -338,6 +368,20 @@ def _format_sensitivity(sens: pd.DataFrame, n: int) -> pd.DataFrame:
         display["Criterion"] = display["Criterion"].apply(
             lambda v: _pretty(v) if isinstance(v, str) else v
         )
+    # Convert numeric-with-NA columns entirely to strings so PyArrow
+    # doesn't choke on mixed float/str types in the SUMMARY row.
+    if "\u0394 Weight" in display.columns:
+        display["\u0394 Weight"] = display["\u0394 Weight"].apply(
+            lambda v: _EM if pd.isna(v) else f"{float(v):+.2f}"
+        )
+    if "New Weight" in display.columns:
+        display["New Weight"] = display["New Weight"].apply(
+            lambda v: _EM if pd.isna(v) else f"{float(v):.4f}"
+        )
+    if "Max Shift" in display.columns:
+        display["Max Shift"] = display["Max Shift"].apply(
+            lambda v: _EM if pd.isna(v) else str(int(float(v)))
+        )
     return display
 
 
@@ -349,7 +393,8 @@ def main() -> None:
     st.caption(
         "Heuristic and indicative: rings show maturity visible in "
         "public evidence, not company quality. "
-        "Independent work sample, not affiliated with or endorsed by PortXL."
+        "Independent work sample, not affiliated with or endorsed by "
+        "any company, accelerator, or programme."
     )
 
     df = _get_radar_df()
@@ -415,82 +460,94 @@ def main() -> None:
         )
         reviewed = reviewed.iloc[0:0]
 
-    # Radar plot
-    st.subheader("Radar")
-    fig, unassigned_list = radar_chart(reviewed)
-    st.plotly_chart(fig, use_container_width=True)
-    if unassigned_list:
+    # ── Radar + Ranked table side by side ────────────────────────────────────
+    col_radar, col_table = st.columns([1.1, 1])
+
+    with col_radar:
+        st.subheader("Radar")
         st.caption(
-            "**Unassigned (not plotted):** " + ", ".join(unassigned_list)
+            "Distance from the centre \u2248 total score "
+            "(closer to centre = higher score). "
+            "Colour = ring. Direction = theme."
         )
-
-    # Ranked table with column config
-    st.subheader("Ranked start-ups")
-    if not reviewed.empty:
-        col_config: dict[str, st.column_config.Column] = {
-            "name": st.column_config.TextColumn("Start-up"),
-            "total_score": st.column_config.ProgressColumn(
-                "Total (0\u2013100)", min_value=0, max_value=100,
-                format="%.1f",
-            ),
-            "ring": st.column_config.TextColumn("Ring"),
-            "theme_label": st.column_config.TextColumn("Theme"),
-            "source_count": st.column_config.NumberColumn("Sources"),
-        }
-        for crit_name in SCORING_CFG.criteria:
-            sc = f"{crit_name}_score"
-            if sc in reviewed.columns:
-                col_config[sc] = st.column_config.ProgressColumn(
-                    _pretty(crit_name) + " (0\u20135)",
-                    min_value=0, max_value=5, format="%.2f",
-                )
-
-        # Theme label
-        if "theme" in reviewed.columns:
-            reviewed = reviewed.copy()
-            reviewed["theme_label"] = reviewed["theme"].map(
-                lambda t: (
-                    SCORING_CFG.quadrants[t].label
-                    if t in SCORING_CFG.quadrants else t
-                )
+        fig, unassigned_list = radar_chart(reviewed)
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": "hover", "displaylogo": False},
+        )
+        if unassigned_list:
+            st.caption(
+                "**Unassigned (not plotted):** " + ", ".join(unassigned_list)
             )
 
-        # Human-readable dates
-        if "source_fetched_at" in reviewed.columns:
-            reviewed["source_fetched_at"] = (
-                reviewed["source_fetched_at"]
-                .fillna("")
-                .apply(
-                    lambda v: ", ".join(
-                        _short_date(d.strip())
-                        for d in str(v).split("|") if d.strip()
+    with col_table:
+        st.subheader("Ranked start-ups")
+        if not reviewed.empty:
+            col_config: dict[str, st.column_config.Column] = {
+                "name": st.column_config.TextColumn("Start-up"),
+                "total_score": st.column_config.ProgressColumn(
+                    "Total (0\u2013100)", min_value=0, max_value=100,
+                    format="%.1f",
+                ),
+                "ring": st.column_config.TextColumn("Ring"),
+                "theme_label": st.column_config.TextColumn("Theme"),
+                "source_count": st.column_config.NumberColumn("Sources"),
+            }
+            for crit_name in SCORING_CFG.criteria:
+                sc = f"{crit_name}_score"
+                if sc in reviewed.columns:
+                    col_config[sc] = st.column_config.ProgressColumn(
+                        _pretty(crit_name) + " (0\u20135)",
+                        min_value=0, max_value=5, format="%.2f",
+                    )
+
+            # Theme label
+            if "theme" in reviewed.columns:
+                reviewed = reviewed.copy()
+                reviewed["theme_label"] = reviewed["theme"].map(
+                    lambda t: (
+                        SCORING_CFG.quadrants[t].label
+                        if t in SCORING_CFG.quadrants else t
                     )
                 )
-            )
-            col_config["source_fetched_at"] = (
-                st.column_config.TextColumn("Fetched")
-            )
 
-        display_cols = [
-            "name", "total_score", "ring", "theme_label",
-        ]
-        score_cols = [
-            f"{c}_score" for c in SCORING_CFG.criteria
-            if f"{c}_score" in reviewed.columns
-        ]
-        display_cols += score_cols
-        if "source_count" in reviewed.columns:
-            display_cols.append("source_count")
-        if "source_fetched_at" in reviewed.columns:
-            display_cols.append("source_fetched_at")
+            # Human-readable dates
+            if "source_fetched_at" in reviewed.columns:
+                reviewed["source_fetched_at"] = (
+                    reviewed["source_fetched_at"]
+                    .fillna("")
+                    .apply(
+                        lambda v: ", ".join(
+                            _short_date(d.strip())
+                            for d in str(v).split("|") if d.strip()
+                        )
+                    )
+                )
+                col_config["source_fetched_at"] = (
+                    st.column_config.TextColumn("Fetched")
+                )
 
-        available = [c for c in display_cols if c in reviewed.columns]
-        st.dataframe(
-            reviewed[available], column_config=col_config,
-            use_container_width=True, hide_index=True,
-        )
-    else:
-        st.info("No scored start-ups to display.")
+            display_cols = [
+                "name", "total_score", "ring", "theme_label",
+            ]
+            score_cols = [
+                f"{c}_score" for c in SCORING_CFG.criteria
+                if f"{c}_score" in reviewed.columns
+            ]
+            display_cols += score_cols
+            if "source_count" in reviewed.columns:
+                display_cols.append("source_count")
+            if "source_fetched_at" in reviewed.columns:
+                display_cols.append("source_fetched_at")
+
+            available = [c for c in display_cols if c in reviewed.columns]
+            st.dataframe(
+                reviewed[available], column_config=col_config,
+                use_container_width=True, hide_index=True,
+            )
+        else:
+            st.info("No scored start-ups to display.")
 
     # "Why this score?" expanders
     if not reviewed.empty:
@@ -516,19 +573,21 @@ def main() -> None:
                         if raw_matched else "(none)"
                     )
 
-                    # Evidence quality: show pages + keywords
+                    # Evidence quality: show hits = pages + keywords breakdown
                     if crit_name == "evidence_quality":
-                        dp = int(row.get("distinct_pages", 0))
-                        kw_count = hits - dp if hits > dp else 0
-                        detail = (
-                            f"{dp} page{'s' if dp != 1 else ''}"
-                            f" + {kw_count} keyword"
-                            f"{'s' if kw_count != 1 else ''}"
+                        pages = int(row.get("evidence_quality_pages", 0))
+                        kw_count = hits - pages if hits > pages else 0
+                        kw_detail = f" ({kw_list})" if kw_list != "(none)" else ""
+                        decomp = (
+                            f"{hits} hit{'s' if hits != 1 else ''} = "
+                            f"{pages} page{'s' if pages != 1 else ''} + "
+                            f"{kw_count} keyword{'s' if kw_count != 1 else ''}"
+                            f"{kw_detail}"
                         )
                         st.markdown(
-                            f"- **{label}**: {sc:.2f}/5 "
-                            f"({detail}, sat. {crit_cfg.saturation})"
-                            f"{ov_tag} \u2014 keywords: {kw_list}"
+                            f"- **Evidence signals**: {sc:.2f}/5 "
+                            f"\u2014 {decomp} / sat.\u00a0{crit_cfg.saturation}"
+                            f"{ov_tag}"
                         )
                     else:
                         st.markdown(
@@ -590,7 +649,10 @@ def main() -> None:
     st.markdown(
         f"**Scoring:** `total = 100 * sum(w_i * s_i / 5)` "
         f"where `s_i = min(5, 5 * hits / saturation)`. "
-        f"Evidence quality hits = distinct pages + evidence keywords.\n\n"
+        f"Evidence quality hits = distinct pages (deduplicated by content hash) "
+        f"+ distinct evidence keywords. "
+        f"This rewards breadth (independent public pages) and proof-type language, "
+        f"not repetition.\n\n"
         f"**n = {n_scored}** scored start-ups. "
         f"Data as of **{_short_date(data_as_of)}**."
     )
@@ -640,7 +702,7 @@ def main() -> None:
     if not is_demo:
         st.caption(
             "Independent work sample, not affiliated with or endorsed "
-            "by PortXL."
+            "by any company, accelerator, or programme."
         )
 
     # Sensitivity table
@@ -652,13 +714,35 @@ def main() -> None:
                 f"n={n_scored} is too small for meaningful sensitivity "
                 f"conclusions."
             )
-        display_sens = _format_sensitivity(sens, n_scored)
+        # Separate SUMMARY row (shown as caption) from data rows (shown as table)
+        summary_mask = sens.get("criterion", sens.iloc[:, 0]) == "SUMMARY"
+        sens_data = sens[~summary_mask].copy()
+        sens_summary = sens[summary_mask]
+
+        display_sens = _format_sensitivity(sens_data, n_scored)
         st.dataframe(
-            display_sens, use_container_width=True, hide_index=True,
+            display_sens,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Criterion": st.column_config.TextColumn(
+                    "Criterion", width="medium"
+                ),
+                "Spearman \u03c1": st.column_config.TextColumn(
+                    "Spearman \u03c1", width="large"
+                ),
+            },
+        )
+        summary_text = (
+            str(sens_summary.iloc[0]["spearman_vs_baseline"])
+            if not sens_summary.empty else ""
         )
         st.caption(
-            "Each row shows the effect of shifting one criterion's "
-            "weight by \u00b10.10 (others rescaled proportionally)."
+            "Each row: effect of \u00b10.10 shift on one criterion weight "
+            "(others rescaled proportionally). "
+            "Spearman \u03c1\u00a0< 1 = ranking changed; "
+            "ring change = at least one start-up crossed a threshold."
+            + (f" \u2014 {summary_text}" if summary_text else "")
         )
 
 
