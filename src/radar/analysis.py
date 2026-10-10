@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -22,14 +24,14 @@ from radar.scoring import NON_SCORED_RINGS
 
 logger = logging.getLogger(__name__)
 
-# README markers — these MUST match what is in README.md
+# README markers these MUST match what is in README.md
 RESULTS_START = "<!-- RESULTS:START -->"
 RESULTS_END = "<!-- RESULTS:END -->"
 SNAPSHOT_START = "<!-- SNAPSHOT:START -->"
 SNAPSHOT_END = "<!-- SNAPSHOT:END -->"
 
 
-# ── Markdown table helper (no tabulate dependency) ────────────────────────────
+#Markdown table helper (no tabulate dependency)
 
 
 def _df_to_md_table(df: pd.DataFrame) -> str:
@@ -55,7 +57,7 @@ def _df_to_md_table(df: pd.DataFrame) -> str:
     return "\n".join([header, sep, *rows]) + "\n"
 
 
-# ── Utility ──────────────────────────────────────────────────────────────────
+#Utility
 
 
 def _spearman_rho(ranks_a: list[float], ranks_b: list[float]) -> str:
@@ -88,6 +90,23 @@ def _average_ranks(scores: list[float]) -> list[float]:
             ranks[indexed[k][0]] = avg_rank
         i = j
     return ranks
+
+
+def _format_date_human(iso: str) -> str:
+    """'2026-10-07T18:02:11.406461+00:00' → '7 Oct 2026'."""
+    if not iso or iso == "unknown":
+        return iso
+    try:
+        dt = datetime.fromisoformat(iso)
+        return dt.strftime("%-d %b %Y")
+    except (ValueError, TypeError):
+        # Try just the date part
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(iso))
+        if m:
+            dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                          tzinfo=timezone.utc)
+            return dt.strftime("%-d %b %Y")
+        return str(iso)
 
 
 # ── RQ1: Coverage ────────────────────────────────────────────────────────────
@@ -335,6 +354,8 @@ def rq4_refresh_cost(demo: bool = False) -> pd.DataFrame:
             mins = pd.to_numeric(df["review_minutes"], errors="coerce")
             valid = mins.dropna()
             if not valid.empty:
+                rows.append({"metric": "total_review_minutes",
+                             "value": str(round(valid.sum(), 2))})
                 rows.append({"metric": "mean_review_minutes",
                              "value": str(round(valid.mean(), 2))})
                 rows.append({"metric": "median_review_minutes",
@@ -461,6 +482,136 @@ def _check_reproducibility(demo: bool = False) -> str:
         return f"not checkable: {exc}"
 
 
+# ── Key findings ─────────────────────────────────────────────────────────────
+
+
+def _rq1_finding(rq1: pd.DataFrame, n: int) -> str:
+    """Templated one-liner for RQ1."""
+    if n < 3:
+        return "n/a"
+    crit_rows = rq1[rq1["criterion"] != "theme"]
+    no_corr: list[str] = []
+    thin: list[str] = []
+    thin_scores: list[str] = []
+    for _, row in crit_rows.iterrows():
+        name = str(row["criterion"]).replace("_", " ")
+        ov_count = int(round(row["share_overridden"] * n))
+        if ov_count == 0:
+            no_corr.append(name)
+        else:
+            thin.append(f"{name} ({ov_count}/{n})")
+            auto = round(float(row["mean_auto_score"]), 2)
+            rev = round(float(row["mean_reviewed_score"]), 2)
+            thin_scores.append(f"{auto:.2f}\u00a0\u2192\u00a0{rev:.2f}")
+    parts: list[str] = []
+    if no_corr:
+        parts.append(
+            f"{' and '.join(no_corr)} needed no correction "
+            f"(0/{n} overridden)"
+        )
+    if thin:
+        score_part = " and ".join(thin_scores)
+        parts.append(
+            f"{' and '.join(thin)} were thin, with mean scores moving "
+            f"{score_part} after review"
+        )
+    return "; ".join(parts) + "." if parts else "no criteria data."
+
+
+def _rq2_finding(
+    rq1: pd.DataFrame, rq2: pd.DataFrame, n: int, cfg: ScoringConfig,
+) -> str:
+    """Templated one-liner for RQ2."""
+    if n < 3:
+        return "n/a"
+    n_criteria = len(cfg.criteria)
+    total_possible = n * n_criteria
+    total_ov = 0
+    crit_rows = rq1[rq1["criterion"] != "theme"]
+    for _, row in crit_rows.iterrows():
+        total_ov += int(round(row["share_overridden"] * n))
+    pct = int(round(100 * total_ov / total_possible)) if total_possible else 0
+    theme_row = rq1[rq1["criterion"] == "theme"]
+    theme_ov = (
+        int(round(float(theme_row.iloc[0]["share_overridden"]) * n))
+        if not theme_row.empty else 0
+    )
+    rho = rq2.iloc[0]["spearman_rho"] if not rq2.empty else "n/a"
+    ring_changes = int(rq2["ring_changed"].sum()) if not rq2.empty else 0
+    return (
+        f"{total_ov} of {total_possible} criterion scores ({pct}%) "
+        f"and {theme_ov} of {n} themes overridden; "
+        f"Spearman \u03c1\u00a0=\u00a0{rho} between automatic and reviewed "
+        f"rankings; {ring_changes} of {n} start-ups changed ring."
+    )
+
+
+def rq3_finding(rq3: pd.DataFrame) -> str:
+    """Templated one-liner for RQ3. Public — also used by the dashboard."""
+    if rq3.empty:
+        return "n/a"
+    summary = rq3[rq3["criterion"] == "SUMMARY"]
+    data_rows = rq3[rq3["criterion"] != "SUMMARY"]
+    n_scenarios = len(data_rows)
+    if summary.empty or n_scenarios == 0:
+        return "n/a"
+    rank_scenarios = int(summary.iloc[0]["rank_changes"])
+    ring_changes = int(summary.iloc[0]["ring_changes"])
+    max_shift = (
+        int(data_rows["max_rank_shift"].max())
+        if "max_rank_shift" in data_rows.columns else 0
+    )
+    shift_text = (
+        f" (max shift {max_shift} place{'s' if max_shift != 1 else ''})"
+        if rank_scenarios > 0 else ""
+    )
+    return (
+        f"{rank_scenarios} of {n_scenarios} \u00b10.10 weight shifts "
+        f"change the order{shift_text}; "
+        f"{ring_changes} ring change{'s' if ring_changes != 1 else ''}."
+    )
+
+
+def _rq4_finding(rq4: pd.DataFrame, n: int) -> str:
+    """Templated one-liner for RQ4."""
+    if n < 3:
+        return "n/a"
+    metrics = dict(zip(rq4["metric"], rq4["value"])) if not rq4.empty else {}
+
+    total_mins = metrics.get("total_review_minutes")
+    mean_mins = metrics.get("mean_review_minutes")
+    if total_mins and mean_mins:
+        total_f = f"{float(total_mins):.0f}"
+        mean_f = f"{float(mean_mins):.1f}"
+        mins_part = f"{total_f} review minutes in total ({mean_f} per start-up)"
+    elif "review_minutes" in metrics:
+        mins_part = f"review minutes {metrics['review_minutes']}"
+    else:
+        mins_part = "review minutes not recorded"
+
+    failed = metrics.get("pages_failed_or_blocked", "0")
+    repro = metrics.get("reproducibility", "unknown")
+
+    return f"{mins_part}; {failed} failed or blocked pages; offline re-run {repro}."
+
+
+def key_findings(
+    rq1: pd.DataFrame,
+    rq2: pd.DataFrame,
+    rq3: pd.DataFrame,
+    rq4: pd.DataFrame,
+    n: int,
+    cfg: ScoringConfig,
+) -> list[str]:
+    """Return one templated finding sentence per RQ."""
+    return [
+        f"**RQ1 Evidence coverage:** {_rq1_finding(rq1, n)}",
+        f"**RQ2 Review effect:** {_rq2_finding(rq1, rq2, n, cfg)}",
+        f"**RQ3 Weight sensitivity:** {rq3_finding(rq3)}",
+        f"**RQ4 Refresh cost:** {_rq4_finding(rq4, n)}",
+    ]
+
+
 # ── Report generation ────────────────────────────────────────────────────────
 
 
@@ -516,11 +667,15 @@ def run_analysis(demo: bool = False) -> None:
     rq4 = rq4_refresh_cost(demo)
     rq4.to_csv(reports_dir / "rq4_refresh_cost.csv", index=False)
 
+    # Human-readable date
+    date_human = _format_date_human(data_as_of)
+    findings = key_findings(rq1, rq2, rq3, rq4, n, cfg)
+
     # Build results.md
     data_label = "SYNTHETIC DEMO" if is_demo else "Real"
     results_md = f"# Results ({data_label} data, n={n})\n\n"
     results_md += (
-        f"Data as of: {data_as_of}. "
+        f"Data as of: {date_human}. "
         "Exploratory analysis only — sample size is too small for "
         "statistical claims.\n\n"
     )
@@ -530,6 +685,12 @@ def run_analysis(demo: bool = False) -> None:
             "> **Warning:** These results are from synthetic demo data "
             "and do not represent real start-ups.\n\n"
         )
+
+    # Key findings
+    results_md += "## Key findings\n\n"
+    for f in findings:
+        results_md += f"- {f}\n"
+    results_md += "\n"
 
     results_md += "## RQ1: Coverage\n\n"
     results_md += _df_to_md_table(rq1) + "\n"
@@ -562,7 +723,7 @@ def run_analysis(demo: bool = False) -> None:
     results_md += "## RQ4: Refresh cost\n\n"
     results_md += _df_to_md_table(rq4) + "\n"
 
-    # Standing limitations
+    # Standing limitations (results.md only, not README)
     results_md += "## Limitations\n\n"
     results_md += (
         "- Keyword matching is context-blind: navigation labels, footers "
@@ -579,6 +740,36 @@ def run_analysis(demo: bool = False) -> None:
     # Update README only for real data, never for demo
     if not demo:
         _update_readme(results_md, n, data_as_of, is_demo)
+
+
+def _results_for_readme(results_md: str) -> str:
+    """Adapt results.md for embedding in README.
+
+    - Strip the H1 title line (README already has ## Results)
+    - Convert ## headings to ### (one level deeper)
+    - Drop the Limitations section (README has its own)
+    """
+    lines = results_md.split("\n")
+    out: list[str] = []
+    in_limitations = False
+    for line in lines:
+        # Skip H1 title
+        if line.startswith("# ") and not line.startswith("## "):
+            continue
+        # Drop Limitations section and everything after it
+        if line.startswith("## Limitations"):
+            in_limitations = True
+            continue
+        if in_limitations:
+            if line.startswith("## "):
+                in_limitations = False
+            else:
+                continue
+        # Downgrade ## → ###
+        if line.startswith("## "):
+            line = "#" + line
+        out.append(line)
+    return "\n".join(out)
 
 
 def _update_readme(
@@ -599,14 +790,16 @@ def _update_readme(
             f"({RESULTS_START} / {RESULTS_END}). "
             f"Add them and retry."
         )
+    readme_block = _results_for_readme(results_md)
     before = content[: content.index(RESULTS_START) + len(RESULTS_START)]
     after = content[content.index(RESULTS_END):]
-    content = before + "\n\n" + results_md + "\n" + after
+    content = before + "\n\n" + readme_block + "\n" + after
 
-    # Update snapshot block
+    # Update snapshot block — human-readable date
     if SNAPSHOT_START in content and SNAPSHOT_END in content:
         label = "demo" if is_demo else "real"
-        snap = f" n={n}, data as of {data_as_of}, dataset: {label} "
+        date_human = _format_date_human(data_as_of)
+        snap = f" n={n}, data as of {date_human}, dataset: {label} "
         sbefore = content[: content.index(SNAPSHOT_START) + len(SNAPSHOT_START)]
         safter = content[content.index(SNAPSHOT_END):]
         content = sbefore + snap + safter

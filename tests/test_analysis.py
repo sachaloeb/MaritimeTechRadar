@@ -14,10 +14,13 @@ from radar.analysis import (
     SNAPSHOT_START,
     _average_ranks,
     _df_to_md_table,
+    _results_for_readme,
     _spearman_rho,
     _update_readme,
+    key_findings,
     rq1_coverage,
     rq2_review_effect,
+    rq3_finding,
     rq3_weight_sensitivity,
 )
 from radar.config import load_scoring_config
@@ -276,7 +279,7 @@ class TestUpdateReadme:
         assert "new results" in content
         assert "old results" not in content
         assert "n=5" in content
-        assert "2026-06-01" in content
+        assert "1 Jun 2026" in content
 
     def test_missing_readme_skips(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -357,3 +360,109 @@ class TestRq3RhoBugFix:
             f"rho should be < 1 when a swap occurred, got {rho!r}"
         )
         assert float(rho) == pytest.approx(0.9, abs=0.01)
+
+
+# ── Key findings ───────────────────────────────────────────────────────────
+
+
+def _overridden_df(cfg) -> pd.DataFrame:
+    """5-row fixture with some overrides for findings tests."""
+    def _row(slug: str, mr: int, mat: int, ov_mat: str = "",
+             theme_ov: str = "", notes: str = "", mins: int = 10) -> dict:
+        return {
+            "slug": slug, "name": slug,
+            "maritime_relevance_hits": mr,
+            "theme_fit_hits": 4,
+            "maturity_signals_hits": mat,
+            "evidence_quality_hits": 2,
+            "evidence_quality_pages": 1,
+            "decarbonisation_energy_hits": 4,
+            "digitalisation_ai_hits": 0,
+            "logistics_operations_hits": 0,
+            "safety_security_hits": 0,
+            "maritime_relevance_override": "",
+            "theme_fit_override": "",
+            "maturity_signals_override": ov_mat,
+            "evidence_quality_override": "",
+            "theme_override": theme_ov,
+            "notes": notes,
+            "reviewed": True,
+            "excluded": False,
+            "ring": "Promising",
+            "review_minutes": mins,
+            "source_urls": "https://example.com/a",
+            "source_fetched_at": "2026-01-15T12:00:00+00:00",
+            "source_statuses": "200",
+            "source_count": 1,
+        }
+    return pd.DataFrame([
+        _row("s1", 10, 1, ov_mat="4.0", notes="adjusted"),
+        _row("s2", 6, 5),
+        _row("s3", 5, 4, ov_mat="3.0", notes="adjusted"),
+        _row("s4", 3, 3, theme_ov="safety_security", notes="theme fix"),
+        _row("s5", 1, 2),
+    ])
+
+
+class TestKeyFindings:
+    def test_findings_returns_four_items(self, cfg):
+        df = _overridden_df(cfg)
+        rq1 = rq1_coverage(df, cfg)
+        rq2 = rq2_review_effect(df, cfg)
+        rq3 = rq3_weight_sensitivity(df, cfg)
+        rq4 = pd.DataFrame([
+            {"metric": "total_review_minutes", "value": "50"},
+            {"metric": "mean_review_minutes", "value": "10.0"},
+            {"metric": "pages_failed_or_blocked", "value": "0"},
+            {"metric": "reproducibility", "value": "identical"},
+        ])
+        findings = key_findings(rq1, rq2, rq3, rq4, 5, cfg)
+        assert len(findings) == 4
+        assert all("RQ" in f for f in findings)
+
+    def test_rq1_finding_mentions_overrides(self, cfg):
+        df = _overridden_df(cfg)
+        rq1 = rq1_coverage(df, cfg)
+        rq2 = rq2_review_effect(df, cfg)
+        rq3 = rq3_weight_sensitivity(df, cfg)
+        rq4 = pd.DataFrame()
+        findings = key_findings(rq1, rq2, rq3, rq4, 5, cfg)
+        # maturity_signals has 2/5 overridden
+        assert "2/5" in findings[0]
+        assert "no correction" in findings[0]
+
+    def test_findings_na_when_n_lt_3(self, cfg):
+        df = _overridden_df(cfg).iloc[:2]
+        rq1 = rq1_coverage(df, cfg)
+        rq2 = rq2_review_effect(df, cfg)
+        rq3 = rq3_weight_sensitivity(df, cfg)
+        rq4 = pd.DataFrame()
+        findings = key_findings(rq1, rq2, rq3, rq4, 2, cfg)
+        assert "n/a" in findings[0]
+        assert "n/a" in findings[1]
+        assert "n/a" in findings[3]
+
+    def test_rq3_finding_from_sensitivity(self, cfg):
+        df = _overridden_df(cfg)
+        rq3 = rq3_weight_sensitivity(df, cfg)
+        sentence = rq3_finding(rq3)
+        assert "±0.10" in sentence or "\u00b10.10" in sentence
+        assert "ring change" in sentence
+
+
+class TestResultsForReadme:
+    def test_h1_stripped(self):
+        md = "# Results (Real data, n=5)\n\nSome text.\n\n## RQ1\n\nTable."
+        result = _results_for_readme(md)
+        assert not result.startswith("# ")
+        assert "### RQ1" in result
+
+    def test_limitations_dropped(self):
+        md = (
+            "## RQ4\n\nTable.\n\n## Limitations\n\n"
+            "- Keyword matching.\n- Sample size.\n"
+        )
+        result = _results_for_readme(md)
+        assert "Limitations" not in result
+        assert "Keyword matching" not in result
+        assert "### RQ4" in result

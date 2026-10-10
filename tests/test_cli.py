@@ -138,6 +138,19 @@ class TestValidate:
         _, warnings = validate_state(demo=True)
         assert any("evidence_quality_pages" in w for w in warnings)
 
+    def test_validate_override_without_notes(self, cli_env: Path):
+        """Override with empty notes triggers a warning."""
+        main(["run", "--demo"])
+        review = cli_env / "data" / "demo" / "review" / "review_sheet.csv"
+        df = pd.read_csv(review)
+        df["reviewed"] = "true"
+        df["notes"] = df["notes"].astype(str)
+        df.loc[0, "maritime_relevance_override"] = 4.0
+        df.loc[0, "notes"] = ""
+        df.to_csv(review, index=False)
+        _, warnings = validate_state(demo=True)
+        assert any("override without a note" in w for w in warnings)
+
     def test_score_refuses_on_validation_error(self, cli_env: Path):
         main(["run", "--demo"])
         review = cli_env / "data" / "demo" / "review" / "review_sheet.csv"

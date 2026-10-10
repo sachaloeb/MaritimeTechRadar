@@ -1,8 +1,3 @@
-# Seed list of maritime/port-tech start-ups to evaluate.
-# Selection rule: public, independent maritime/port-tech start-ups with at
-#   least one working English-language URL, not in a current accelerator cohort.
-# Verified 2026-10-07.
-
 startups:
   - name: "Portchain"
     slug: "portchain"
@@ -39,8 +34,6 @@ startups:
       - "https://www.cydome.io/about"
     notes: "Maritime cybersecurity. Expected theme: safety_security."
 
-  # Reserves, in case an entry above fails the rule, is blocked by robots.txt or has empty pages.
-  # Activate by removing the leading '# ' from the whole block, then verify as above.
   # - name: "Smart Green Shipping"
   #   slug: "smart-green-shipping"
   #   urls:

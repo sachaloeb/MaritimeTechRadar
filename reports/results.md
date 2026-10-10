@@ -1,6 +1,11 @@
 # Results (Real data, n=5)
 
-Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — sample size is too small for statistical claims.
+## Key findings
+
+- **RQ1 Evidence coverage:** maritime relevance and theme fit needed no correction (0/5 overridden); maturity signals (3/5) and evidence quality (2/5) were thin, with mean scores moving 1.83 → 3.43 and 2.67 → 3.23 after review.
+- **RQ2 Review effect:** 5 of 20 criterion scores (25%) and 2 of 5 themes overridden; Spearman ρ = 0.9000 between automatic and reviewed rankings; 3 of 5 start-ups changed ring.
+- **RQ3 Weight sensitivity:** 2 of 8 ±0.10 weight shifts change the order (max shift 1 place); 0 ring changes.
+- **RQ4 Refresh cost:** 63 review minutes in total (12.6 per start-up); 0 failed or blocked pages; offline re-run identical (extracted + radar).
 
 ## RQ1: Coverage
 
@@ -40,6 +45,7 @@ Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — samp
 
 | metric | value |
 | --- | --- |
+| total_review_minutes | 63 |
 | mean_review_minutes | 12.6 |
 | median_review_minutes | 12.0 |
 | pages_cache_hit | 10 |
@@ -47,7 +53,7 @@ Data as of: 2026-10-07T18:02:11.406461+00:00. Exploratory analysis only — samp
 | pages_usable_total | 10 |
 | reproducibility | identical (extracted + radar) |
 | extracted_csv_hash | 34db653d40170284 |
-| radar_csv_hash | 2ab36e525cd4944a |
+| radar_csv_hash | 1abe57ae6462800c |
 
 ## Limitations
 

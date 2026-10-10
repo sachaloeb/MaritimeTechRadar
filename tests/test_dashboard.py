@@ -15,9 +15,9 @@ def _demo_radar_df() -> pd.DataFrame:
             {
                 "slug": "demo-alpha",
                 "name": "Alpha Marine",
-                "source_urls": "https://example.com/alpha",
-                "source_fetched_at": "2026-01-15T12:00:00+00:00",
-                "source_statuses": "200",
+                "source_urls": "https://example.com/alpha|https://example.com/alpha2",
+                "source_fetched_at": "2026-01-15T12:00:00+00:00|2026-01-16T12:00:00+00:00",
+                "source_statuses": "200|200",
                 "source_count": 2,
                 "evidence_quality_pages": 1,
                 "maritime_relevance_hits": 8,
@@ -33,6 +33,7 @@ def _demo_radar_df() -> pd.DataFrame:
                 "maturity_signals_override": "",
                 "evidence_quality_override": "",
                 "theme_override": "",
+                "notes": "Good evidence from homepage",
                 "maritime_relevance_matched": "maritime|shipping|port",
                 "theme_fit_matched": "decarbonisation|hydrogen",
                 "maturity_signals_matched": "pilot|funding",
@@ -71,6 +72,7 @@ def _demo_radar_df() -> pd.DataFrame:
                 "maturity_signals_override": "",
                 "evidence_quality_override": "",
                 "theme_override": "",
+                "notes": "",
                 "maritime_relevance_matched": "maritime|cargo",
                 "theme_fit_matched": "logistics",
                 "maturity_signals_matched": "customer",
@@ -217,6 +219,85 @@ class TestDashboardExtended:
         # Alpha: evidence_quality_pages=1, hits=2, matched="case study" → 1 keyword
         # → "2 hits = 1 page + 1 keyword"
         assert "hits =" in all_md
+
+    def test_sources_table_all_rows_have_dates(self, app):
+        """Every source row has a non-empty Retrieved date (bug fix)."""
+        dfs = [d.value for d in app.dataframe]
+        src_dfs = [d for d in dfs if hasattr(d, "columns") and "URL" in d.columns]
+        assert src_dfs, "No sources table found"
+        src = src_dfs[0]
+        assert "Retrieved" in src.columns
+        for _, row in src.iterrows():
+            assert str(row["Retrieved"]).strip(), (
+                f"Empty Retrieved for {row.get('URL', '?')}"
+            )
+
+    def test_nan_matched_renders_zero_keywords(self, tmp_path, monkeypatch):
+        """NaN *_matched should render as '0 keywords', never '(nan)'."""
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+
+        st.cache_data.clear()
+        df = _demo_radar_df()
+        # Set evidence_quality_matched to NaN and hits/pages to 1/1
+        df.loc[0, "evidence_quality_matched"] = float("nan")
+        df.loc[0, "evidence_quality_hits"] = 1
+        df.loc[0, "evidence_quality_pages"] = 1
+        csv_path = tmp_path / "radar_nan.csv"
+        df.to_csv(csv_path, index=False)
+        monkeypatch.setenv("RADAR_CSV", str(csv_path))
+        dashboard_path = str(
+            Path(__file__).resolve().parent.parent / "app" / "dashboard.py"
+        )
+        at = AppTest.from_file(dashboard_path, default_timeout=30)
+        at.run()
+        assert not at.exception, f"Dashboard raised: {at.exception}"
+        all_md = " ".join(str(m.value) for m in at.markdown)
+        assert "(nan)" not in all_md
+        assert "0 keyword" in all_md
+
+    def test_reviewer_note_shown(self, app):
+        """Reviewer notes appear in 'Why this score?' expander."""
+        all_md = " ".join(str(m.value) for m in app.markdown)
+        assert "Reviewer note" in all_md
+        assert "Good evidence from homepage" in all_md
+
+    def test_theme_fit_names_best_quadrant(self, app):
+        """Theme Fit line names the best keyword theme."""
+        all_md = " ".join(str(m.value) for m in app.markdown)
+        assert "best keyword theme:" in all_md
+
+    def test_theme_override_detail(self, tmp_path, monkeypatch):
+        """Theme override shows original best match."""
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+
+        st.cache_data.clear()
+        df = _demo_radar_df()
+        # Override Alpha's theme from decarb to safety
+        df.loc[0, "theme_override"] = "safety_security"
+        df.loc[0, "theme"] = "safety_security"
+        csv_path = tmp_path / "radar_tov.csv"
+        df.to_csv(csv_path, index=False)
+        monkeypatch.setenv("RADAR_CSV", str(csv_path))
+        dashboard_path = str(
+            Path(__file__).resolve().parent.parent / "app" / "dashboard.py"
+        )
+        at = AppTest.from_file(dashboard_path, default_timeout=30)
+        at.run()
+        assert not at.exception, f"Dashboard raised: {at.exception}"
+        all_md = " ".join(str(m.value) for m in at.markdown)
+        assert "reviewer override" in all_md
+        assert "keyword best match:" in all_md
+
+    def test_method_table_theme_fit_wording(self, app):
+        """Method table says 'Hits in the best-matching theme', not 'best_quadrant'."""
+        dfs = [d.value for d in app.dataframe]
+        for d in dfs:
+            if hasattr(d, "columns") and "Method" in d.columns:
+                methods = list(d["Method"].values)
+                assert any("best-matching theme" in str(m) for m in methods)
+                assert not any("best_quadrant" in str(m) for m in methods)
 
     def test_unreviewed_toggle(self, tmp_path: Path, monkeypatch):
         """Unreviewed rows appear when toggled on."""

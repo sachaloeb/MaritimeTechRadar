@@ -58,6 +58,18 @@ def _short_label(label: str) -> str:
     )
 
 
+def _best_quadrant(row: pd.Series) -> tuple[str, int]:
+    """Return (label, hits) for the quadrant with the most keyword hits."""
+    best_label = "Unknown"
+    best_hits = 0
+    for qid in SCORING_CFG.quadrants:
+        h = int(row.get(f"{qid}_hits", 0))
+        if h > best_hits:
+            best_hits = h
+            best_label = SCORING_CFG.quadrants[qid].label
+    return best_label, best_hits
+
+
 def _text_position(theta: float) -> str:
     """Best Plotly textposition for a polar marker at angle theta (clockwise from N)."""
     theta = theta % 360
@@ -71,7 +83,7 @@ def _text_position(theta: float) -> str:
         return "middle left"
 
 
-# ── Data loading ─────────────────────────────────────────────────────────────
+#Data loading
 
 
 @st.cache_data
@@ -118,7 +130,7 @@ def _data_as_of(df: pd.DataFrame) -> str:
     return max(clean) if clean else "unknown"
 
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
+#Sidebar
 
 
 def _reset_weights() -> None:
@@ -148,7 +160,7 @@ def sidebar(
             key=f"w_{crit_name}",
         )
 
-    # Reset button — on_click fires before the next run, so sliders
+    # Reset button on_click fires before the next run, so sliders
     # pick up the restored defaults without a manual rerun.
     st.sidebar.button("Reset weights", on_click=_reset_weights)
 
@@ -199,7 +211,7 @@ def sidebar(
     return weights, theme_filter, show_unreviewed
 
 
-# ── Radar chart ──────────────────────────────────────────────────────────────
+#Radar chart
 
 
 def _deterministic_jitter(
@@ -276,7 +288,7 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
             hoverinfo="text",
         ))
 
-    # Ring colour legend — one invisible trace per ring only
+    # Ring colour legend one invisible trace per ring only
     for ring_name, colour in RING_COLOURS.items():
         fig.add_trace(go.Scatterpolar(
             r=[None], theta=[None],
@@ -309,7 +321,7 @@ def radar_chart(df: pd.DataFrame) -> tuple[go.Figure, list[str]]:
     return fig, unassigned
 
 
-# ── Sources table ────────────────────────────────────────────────────────────
+#Sources table
 
 
 def _build_sources_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -333,7 +345,7 @@ def _build_sources_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ── Sensitivity table ────────────────────────────────────────────────────────
+#Sensitivity table
 
 
 def _compute_sensitivity(df: pd.DataFrame) -> pd.DataFrame | None:
@@ -385,7 +397,7 @@ def _format_sensitivity(sens: pd.DataFrame, n: int) -> pd.DataFrame:
     return display
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+#Main
 
 
 def main() -> None:
@@ -460,7 +472,7 @@ def main() -> None:
         )
         reviewed = reviewed.iloc[0:0]
 
-    # ── Radar + Ranked table side by side ────────────────────────────────────
+    #Radar+Ranked table side by side
     col_radar, col_table = st.columns([1.1, 1])
 
     with col_radar:
@@ -502,7 +514,7 @@ def main() -> None:
                         min_value=0, max_value=5, format="%.2f",
                     )
 
-            # Theme label
+            #Theme label
             if "theme" in reviewed.columns:
                 reviewed = reviewed.copy()
                 reviewed["theme_label"] = reviewed["theme"].map(
@@ -512,9 +524,10 @@ def main() -> None:
                     )
                 )
 
-            # Human-readable dates
+            # Human-readable dates — display copy so pipe-joined originals
+            # remain intact for _build_sources_table later
             if "source_fetched_at" in reviewed.columns:
-                reviewed["source_fetched_at"] = (
+                reviewed["fetched_display"] = (
                     reviewed["source_fetched_at"]
                     .fillna("")
                     .apply(
@@ -524,7 +537,7 @@ def main() -> None:
                         )
                     )
                 )
-                col_config["source_fetched_at"] = (
+                col_config["fetched_display"] = (
                     st.column_config.TextColumn("Fetched")
                 )
 
@@ -538,8 +551,8 @@ def main() -> None:
             display_cols += score_cols
             if "source_count" in reviewed.columns:
                 display_cols.append("source_count")
-            if "source_fetched_at" in reviewed.columns:
-                display_cols.append("source_fetched_at")
+            if "fetched_display" in reviewed.columns:
+                display_cols.append("fetched_display")
 
             available = [c for c in display_cols if c in reviewed.columns]
             st.dataframe(
@@ -549,7 +562,7 @@ def main() -> None:
         else:
             st.info("No scored start-ups to display.")
 
-    # "Why this score?" expanders
+    #"Why this score?" expanders
     if not reviewed.empty:
         st.subheader("Why this score?")
         for _, row in reviewed.iterrows():
@@ -560,26 +573,33 @@ def main() -> None:
                 for crit_name, crit_cfg in SCORING_CFG.criteria.items():
                     sc = row.get(f"{crit_name}_score", 0)
                     hits = int(row.get(f"{crit_name}_hits", 0))
-                    raw_matched = str(
-                        row.get(f"{crit_name}_matched", "")
-                    )
+                    raw_matched = row.get(f"{crit_name}_matched", "")
+                    if pd.isna(raw_matched) or str(raw_matched).strip() in (
+                        "", "nan",
+                    ):
+                        raw_matched = ""
+                    else:
+                        raw_matched = str(raw_matched).strip()
                     ov = row.get(f"{crit_name}_override", "")
                     is_ov = pd.notna(ov) and str(ov).strip() != ""
                     label = _pretty(crit_name)
 
                     ov_tag = " **(overridden)**" if is_ov else ""
                     kw_list = (
-                        ", ".join(raw_matched.split("|"))
+                        ", ".join(k for k in raw_matched.split("|") if k)
                         if raw_matched else "(none)"
                     )
+                    hit_s = "hit" if hits == 1 else "hits"
 
-                    # Evidence quality: show hits = pages + keywords breakdown
                     if crit_name == "evidence_quality":
+                        # Evidence quality: hits = pages + keywords
                         pages = int(row.get("evidence_quality_pages", 0))
                         kw_count = hits - pages if hits > pages else 0
-                        kw_detail = f" ({kw_list})" if kw_list != "(none)" else ""
+                        kw_detail = (
+                            f" ({kw_list})" if kw_list != "(none)" else ""
+                        )
                         decomp = (
-                            f"{hits} hit{'s' if hits != 1 else ''} = "
+                            f"{hits} {hit_s} = "
                             f"{pages} page{'s' if pages != 1 else ''} + "
                             f"{kw_count} keyword{'s' if kw_count != 1 else ''}"
                             f"{kw_detail}"
@@ -589,13 +609,45 @@ def main() -> None:
                             f"\u2014 {decomp} / sat.\u00a0{crit_cfg.saturation}"
                             f"{ov_tag}"
                         )
+                    elif crit_name == "theme_fit":
+                        # Theme Fit: name the best quadrant
+                        best_q, best_h = _best_quadrant(row)
+                        st.markdown(
+                            f"- **{label}**: {sc:.2f}/5 "
+                            f"\u2014 best keyword theme: {best_q} "
+                            f"({best_h} {hit_s} / "
+                            f"{crit_cfg.saturation} sat.)"
+                            f"{ov_tag}"
+                        )
                     else:
                         st.markdown(
                             f"- **{label}**: {sc:.2f}/5 "
-                            f"({hits} hits / "
+                            f"({hits} {hit_s} / "
                             f"{crit_cfg.saturation} sat.)"
                             f"{ov_tag} \u2014 keywords: {kw_list}"
                         )
+
+                # Theme override detail
+                theme_ov = row.get("theme_override", "")
+                if pd.notna(theme_ov) and str(theme_ov).strip():
+                    displayed = str(row.get("theme", ""))
+                    displayed_label = (
+                        SCORING_CFG.quadrants[displayed].label
+                        if displayed in SCORING_CFG.quadrants else displayed
+                    )
+                    best_q, best_h = _best_quadrant(row)
+                    st.markdown(
+                        f"- **Theme**: {displayed_label} "
+                        f"(reviewer override; keyword best match: "
+                        f"{best_q}, {best_h} hits)"
+                    )
+
+                # Reviewer notes
+                notes = row.get("notes", "")
+                if pd.notna(notes) and str(notes).strip():
+                    st.markdown(
+                        f"- **Reviewer note**: {str(notes).strip()}"
+                    )
 
     # Unreviewed table
     if show_unreviewed and not unreviewed.empty:
@@ -663,7 +715,7 @@ def main() -> None:
         label = _pretty(crit_name)
         method = "Whole-word keyword hits"
         if crit_cfg.derived_from:
-            method = f"Derived from {crit_cfg.derived_from}"
+            method = "Hits in the best-matching theme"
         if crit_name == "evidence_quality":
             method = "Distinct pages + evidence keyword hits"
         crit_rows.append({
@@ -744,6 +796,11 @@ def main() -> None:
             "ring change = at least one start-up crossed a threshold."
             + (f" \u2014 {summary_text}" if summary_text else "")
         )
+        # RQ3 finding sentence
+        from radar.analysis import rq3_finding
+        finding = rq3_finding(sens)
+        if finding != "n/a":
+            st.markdown(finding)
 
 
 main()

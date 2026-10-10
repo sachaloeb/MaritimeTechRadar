@@ -237,6 +237,25 @@ def validate_state(
                 f"no review_minutes (review may be nominal)"
             )
 
+    # Override without notes
+    for _, row in reviewed.iterrows():
+        slug = str(row.get("slug", "?"))
+        has_any_override = False
+        for crit in scoring_cfg.criteria:
+            ov = row.get(f"{crit}_override")
+            if pd.notna(ov) and str(ov).strip() != "":
+                has_any_override = True
+                break
+        tov = row.get("theme_override")
+        if pd.notna(tov) and str(tov).strip() != "":
+            has_any_override = True
+        if has_any_override:
+            notes = row.get("notes", "")
+            if not (pd.notna(notes) and str(notes).strip()):
+                warnings.append(
+                    f"{slug}: override without a note"
+                )
+
     # Zero usable pages not excluded
     if "source_count" in df.columns:
         zero_pages = non_excluded[non_excluded["source_count"] == 0]
